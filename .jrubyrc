@@ -1,0 +1,2 @@
+# for simplecov to work in jruby, without this we are getting errors when debugging spec tests
+debug.fullTrace=true

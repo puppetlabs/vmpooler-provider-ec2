@@ -1,0 +1,11 @@
+.bundle/
+.vagrant/
+coverage/
+vendor/
+.dccache
+.ruby-version
+Gemfile.local
+results.xml
+/vmpooler.yaml
+.idea
+*.json
