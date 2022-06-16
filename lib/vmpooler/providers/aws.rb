@@ -3,6 +3,7 @@
 require 'bigdecimal'
 require 'bigdecimal/util'
 require 'vmpooler/providers/base'
+require 'aws-sdk-ec2'
 
 module Vmpooler
   class PoolManager
@@ -14,7 +15,10 @@ module Vmpooler
 
         def initialize(config, logger, metrics, redis_connection_pool, name, options)
           super(config, logger, metrics, redis_connection_pool, name, options)
-
+          
+          @aws_access_key = ENV['ABS_AWS_ACCESS_KEY']
+          @aws_secret_key = ENV['ABS_AWS_SECRET_KEY'] 
+    
           task_limit = global_config[:config].nil? || global_config[:config]['task_limit'].nil? ? 10 : global_config[:config]['task_limit'].to_i
           # The default connection pool size is:
           # Whatever is biggest from:
@@ -77,6 +81,10 @@ module Vmpooler
         def zone(pool_name)
           return pool_config(pool_name)['zone'] if pool_config(pool_name)['zone']
           return provider_config['zone'] if provider_config['zone']
+        end
+
+        def region
+          return provider_config['region'] if provider_config['region']
         end
 
         def machine_type(pool_name)
@@ -172,38 +180,60 @@ module Vmpooler
           debug_logger('create_vm')
           pool = pool_config(pool_name)
           raise("Pool #{pool_name} does not exist for the provider #{name}") if pool.nil?
+          
+          if zone(pool_name) == 'us-west-2b'
+            subnet_id = 'subnet-0fe90a688844f6f26'
+          else
+            subnet_id = 'subnet-091b436f'
+          end
+          tag =  [
+            {
+              resource_type: "instance", # accepts capacity-reservation, client-vpn-endpoint, customer-gateway, carrier-gateway, dedicated-host, dhcp-options, egress-only-internet-gateway, elastic-ip, elastic-gpu, export-image-task, export-instance-task, fleet, fpga-image, host-reservation, image, import-image-task, import-snapshot-task, instance, instance-event-window, internet-gateway, ipam, ipam-pool, ipam-scope, ipv4pool-ec2, ipv6pool-ec2, key-pair, launch-template, local-gateway, local-gateway-route-table, local-gateway-virtual-interface, local-gateway-virtual-interface-group, local-gateway-route-table-vpc-association, local-gateway-route-table-virtual-interface-group-association, natgateway, network-acl, network-interface, network-insights-analysis, network-insights-path, network-insights-access-scope, network-insights-access-scope-analysis, placement-group, prefix-list, replace-root-volume-task, reserved-instances, route-table, security-group, security-group-rule, snapshot, spot-fleet-request, spot-instances-request, subnet, subnet-cidr-reservation, traffic-mirror-filter, traffic-mirror-session, traffic-mirror-target, transit-gateway, transit-gateway-attachment, transit-gateway-connect-peer, transit-gateway-multicast-domain, transit-gateway-route-table, volume, vpc, vpc-endpoint, vpc-endpoint-service, vpc-peering-connection, vpn-connection, vpn-gateway, vpc-flow-log
+              tags: [
+                {
+                  key: "lifetime",
+                  value: "1d",
+                },
+                {
+                  key: "created_by",
+                  value: "Tanisha",
+                },
+                {
+                  key: "job_url",
+                  value: "",
+                },
+                {
+                  key: "organization",
+                  value: "engineering",
+                },
+                {
+                  key: "portfolio",
+                  value: "ds-ci",
+                },
 
-          # harcoded network info
-          network_interfaces = Google::Apis::ComputeV1::NetworkInterface.new(
-            network: network_name
-          )
-          network_interfaces.subnetwork = subnetwork_name(pool_name) if subnetwork_name(pool_name)
-          init_params = {
-            source_image: pool['template'], # The source image to create this disk.
-            labels: { 'vm' => new_vmname, 'pool' => pool_name },
-            disk_name: "#{new_vmname}-disk0"
+              ],
+            },
+          ]
+          config = {
+              min_count: 1,
+              max_count: 1,
+              image_id: pool['template'],
+              monitoring: {:enabled => true},
+              key_name: 'always-be-scheduling',
+              security_group_ids: ['sg-697fb015'],
+              instance_type: pool['amisize'],
+              disable_api_termination: false,
+              instance_initiated_shutdown_behavior: 'terminate',
+              tag_specifications: tag,
+              subnet_id: subnet_id
           }
-          disk = Google::Apis::ComputeV1::AttachedDisk.new(
-            auto_delete: true,
-            boot: true,
-            initialize_params: Google::Apis::ComputeV1::AttachedDiskInitializeParams.new(init_params)
-          )
-          append_domain = domain || global_config[:config]['domain']
-          fqdn = "#{new_vmname}.#{append_domain}" if append_domain
-
-          # Assume all pool config is valid i.e. not missing
-          client = ::Google::Apis::ComputeV1::Instance.new(
-            name: new_vmname,
-            hostname: fqdn,
-            machine_type: pool['machine_type'],
-            disks: [disk],
-            network_interfaces: [network_interfaces],
-            labels: { 'vm' => new_vmname, 'pool' => pool_name },
-            tags: Google::Apis::ComputeV1::Tags.new(items: [project])
-          )
+    
+        #  if volume_size
+        #    config[:block_device_mappings] = get_block_device_mappings(image_id, volume_size)
+        #  end          
 
           debug_logger('trigger insert_instance')
-          result = connection.insert_instance(project, zone(pool_name), client)
+          result = connection.create_instances(config)
           wait_for_operation(project, pool_name, result)
           created_instance = get_vm(pool_name, new_vmname)
           dns_setup(created_instance)
@@ -665,7 +695,7 @@ module Vmpooler
         end
 
         def ensured_aws_connection(connection_pool_object)
-          connection_pool_object[:connection] = connect_to_gce unless connection_pool_object[:connection]
+          connection_pool_object[:connection] = connect_to_aws unless connection_pool_object[:connection]
           connection_pool_object[:connection]
         end
 
@@ -674,12 +704,11 @@ module Vmpooler
           retry_factor = global_config[:config]['retry_factor'] || 10
           try = 1
           begin
-            scopes = ['https://www.googleapis.com/auth/compute', 'https://www.googleapis.com/auth/cloud-platform']
-
-            authorization = Google::Auth.get_application_default(scopes)
-
-            compute = ::Google::Apis::ComputeV1::ComputeService.new
-            compute.authorization = authorization
+            compute = ::Aws::EC2::Resource.new(
+              region: region,
+              credentials: ::Aws::Credentials.new(@aws_access_key, @aws_secret_key),
+              log_level: :debug
+            )
 
             metrics.increment('connect.open')
             compute
