@@ -31,7 +31,7 @@ describe 'Vmpooler::PoolManager::Provider::Aws' do
       size: 5
       timeout: 10
       ready_ttl: 1440
-      provider: 'gce'
+      provider: 'aws'
       machine_type: 'zones/#{zone}/machineTypes/e2-micro'
 EOT
     )
