@@ -58,9 +58,9 @@ EOT
       let(:project) { 'vmpooler-test' }
       it 'gets a vm' do
         result = subject.create_vm(poolname, vmname)
-        #result = subject.destroy_vm(poolname, vmname)
-        subject.get_vm(poolname, vmname)
-        #subject.dns_teardown({'name' => vmname})
+        # result = subject.destroy_vm(poolname, vmname)
+        # subject.get_vm(poolname, vmname)
+        # subject.dns_teardown({'name' => vmname})
         # subject.dns_setup({'name' => vmname, 'ip' => '1.2.3.5'})
       end
     end

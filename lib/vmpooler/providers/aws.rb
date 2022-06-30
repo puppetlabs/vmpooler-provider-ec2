@@ -151,7 +151,7 @@ module Vmpooler
           vm_hash = nil
           begin
             vm_object = connection.get_instance(project, zone(pool_name), vm_name)
-          rescue ::Google::Apis::ClientError => e
+          rescue ::Aws::EC2::ClientError => e
             raise e unless e.status_code == 404
 
             # swallow the ClientError error 404 and return nil when the VM was not found
@@ -234,10 +234,8 @@ module Vmpooler
 
           debug_logger('trigger insert_instance')
           result = connection.create_instances(config)
-          wait_for_operation(project, pool_name, result)
-          created_instance = get_vm(pool_name, new_vmname)
-          dns_setup(created_instance)
-          created_instance
+#          created_instance = get_vm(pool_name, new_vmname          
+#          created_instance
         end
 
         # create_disk creates an additional disk for an existing VM. It will name the new
