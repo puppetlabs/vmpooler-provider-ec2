@@ -54,12 +54,12 @@ EOT
   describe '#manual tests live' do
     context 'in itsysops' do
       before(:each) { allow(subject).to receive(:dns).and_call_original }
-      let(:vmname) { "instance-24" }
+      let(:vmname) { "instance-25" }
       let(:project) { 'vmpooler-test' }
-      it 'gets a vm' do
+      skip 'gets a vm' do
         result = subject.create_vm(poolname, vmname)
         # result = subject.destroy_vm(poolname, vmname)
-        # subject.get_vm(poolname, vmname)
+        subject.get_vm(poolname, vmname)
         # subject.dns_teardown({'name' => vmname})
         # subject.dns_setup({'name' => vmname, 'ip' => '1.2.3.5'})
       end

@@ -65,16 +65,8 @@ module Vmpooler
         end
 
         # main configuration options
-        def project
-          provider_config['project']
-        end
-
-        def network_name
-          provider_config['network_name']
-        end
-
-        def subnetwork_name(pool_name)
-          return pool_config(pool_name)['subnetwork_name'] if pool_config(pool_name)['subnetwork_name']
+        def region
+          return provider_config['region'] if provider_config['region']
         end
 
         # main configuration options, overridable for each pool
@@ -83,15 +75,17 @@ module Vmpooler
           return provider_config['zone'] if provider_config['zone']
         end
 
-        def region
-          return provider_config['region'] if provider_config['region']
+        def amisize(pool_name)
+          return pool_config(pool_name)['amisize'] if pool_config(pool_name)['amisize']
+          return provider_config['amisize'] if provider_config['amisize']
         end
 
-        def machine_type(pool_name)
-          return pool_config(pool_name)['machine_type'] if pool_config(pool_name)['machine_type']
-          return provider_config['machine_type'] if provider_config['machine_type']
+        def volume_size(pool_name)
+          return pool_config(pool_name)['volume_size'] if pool_config(pool_name)['volume_size']
+          return provider_config['volume_size'] if provider_config['volume_size']
         end
 
+        #dns
         def domain
           provider_config['domain']
         end
@@ -100,10 +94,20 @@ module Vmpooler
           provider_config['dns_zone_resource_name']
         end
 
+        #subnets
+        def get_subnet_id(pool_name)
+          case zone(pool_name)
+          when 'us-west-2b'
+            return 'subnet-0fe90a688844f6f26'
+          when 'us-west-2a'
+            return 'subnet-091b436f'
+          end
+        end
+
         # Base methods that are implemented:
 
         # vms_in_pool lists all the VM names in a pool, which is based on the VMs
-        # having a label "pool" that match a pool config name.
+        # having a tag "pool" that match a pool config name.
         # inputs
         #   [String] pool_name : Name of the pool
         # returns
@@ -118,13 +122,16 @@ module Vmpooler
           raise("Pool #{pool_name} does not exist for the provider #{name}") if pool.nil?
 
           zone = zone(pool_name)
-          filter = "(labels.pool = #{pool_name})"
+          filters = [{
+                       name: "tag:pool",
+                       values: [pool_name],
+                     }]
           instance_list = connection.list_instances(project, zone, filter: filter)
 
-          return vms if instance_list.items.nil?
+          return vms if instance_list.size.nil? || instance_list.size == 0
 
           instance_list.items.each do |vm|
-            vms << { 'name' => vm.name }
+            vms << { 'name' => vm.tags.detect {|f| f.key == 'vm_name' }&.value || "vm_name not found in tags" }
           end
           debug_logger(vms)
           vms
@@ -134,23 +141,24 @@ module Vmpooler
         #   [String] pool_name : Name of the pool
         #   [String] vm_name   : Name of the VM to find
         # returns
-        #   nil if VM doesn't exist
+        #   nil if VM doesn't exist name, template, poolname, boottime, status, image_size, private_ip_address
         #   [Hastable] of the VM
         #    [String] name       : The name of the resource, provided by the client when initially creating the resource
-        #    [String] hostname   : Specifies the hostname of the instance. The specified hostname must be RFC1035 compliant. If hostname is not specified,
-        #                          the default hostname is [ INSTANCE_NAME].c.[PROJECT_ID].internal when using the global DNS, and
-        #                          [ INSTANCE_NAME].[ZONE].c.[PROJECT_ID].internal when using zonal DNS
         #    [String] template   : This is the name of template
-        #    [String] poolname   : Name of the pool the VM as per labels
+        #    [String] poolname   : Name of the pool the VM
         #    [Time]   boottime   : Time when the VM was created/booted
-        #    [String] status     : One of the following values: PROVISIONING, STAGING, RUNNING, STOPPING, SUSPENDING, SUSPENDED, REPAIRING, and TERMINATED
-        #    [String] zone       : URL of the zone where the instance resides.
-        #    [String] machine_type : Full or partial URL of the machine type resource to use for this instance, in the format: zones/zone/machineTypes/machine-type.
+        #    [String] status     : One of the following values: pending, running, shutting-down, terminated, stopping, stopped
+        #    [String] image_size : The EC2 image size eg a1.large
+        #    [String] private_ip_address: The private IPv4 address
         def get_vm(pool_name, vm_name)
           debug_logger('get_vm')
           vm_hash = nil
           begin
-            vm_object = connection.get_instance(project, zone(pool_name), vm_name)
+            filters = [{
+              name: "tag:vm_name",
+              values: [vm_name],
+            }]
+            instances = connection.instances(filters: filters)
           rescue ::Aws::EC2::ClientError => e
             raise e unless e.status_code == 404
 
@@ -158,9 +166,9 @@ module Vmpooler
             return nil
           end
 
-          return vm_hash if vm_object.nil?
+          return vm_hash if instances.size.nil? || instances.size == 0
 
-          vm_hash = generate_vm_hash(vm_object, pool_name)
+          vm_hash = generate_vm_hash(instances.first, pool_name)
           debug_logger("vm_hash #{vm_hash}")
           vm_hash
         end
@@ -180,27 +188,32 @@ module Vmpooler
           debug_logger('create_vm')
           pool = pool_config(pool_name)
           raise("Pool #{pool_name} does not exist for the provider #{name}") if pool.nil?
-          
-          if zone(pool_name) == 'us-west-2b'
-            subnet_id = 'subnet-0fe90a688844f6f26'
-          else
-            subnet_id = 'subnet-091b436f'
-          end
+          raise("Instance creation not attempted, #{new_vmname} already exists") if get_vm(pool_name, new_vmname)
+
+          subnet_id = get_subnet_id(pool_name)
           tag =  [
             {
               resource_type: "instance", # accepts capacity-reservation, client-vpn-endpoint, customer-gateway, carrier-gateway, dedicated-host, dhcp-options, egress-only-internet-gateway, elastic-ip, elastic-gpu, export-image-task, export-instance-task, fleet, fpga-image, host-reservation, image, import-image-task, import-snapshot-task, instance, instance-event-window, internet-gateway, ipam, ipam-pool, ipam-scope, ipv4pool-ec2, ipv6pool-ec2, key-pair, launch-template, local-gateway, local-gateway-route-table, local-gateway-virtual-interface, local-gateway-virtual-interface-group, local-gateway-route-table-vpc-association, local-gateway-route-table-virtual-interface-group-association, natgateway, network-acl, network-interface, network-insights-analysis, network-insights-path, network-insights-access-scope, network-insights-access-scope-analysis, placement-group, prefix-list, replace-root-volume-task, reserved-instances, route-table, security-group, security-group-rule, snapshot, spot-fleet-request, spot-instances-request, subnet, subnet-cidr-reservation, traffic-mirror-filter, traffic-mirror-session, traffic-mirror-target, transit-gateway, transit-gateway-attachment, transit-gateway-connect-peer, transit-gateway-multicast-domain, transit-gateway-route-table, volume, vpc, vpc-endpoint, vpc-endpoint-service, vpc-peering-connection, vpn-connection, vpn-gateway, vpc-flow-log
               tags: [
                 {
+                  key: "vm_name",
+                  value: new_vmname,
+                },
+                {
+                  key: "pool",
+                  value: pool_name,
+                },
+                {
                   key: "lifetime",
-                  value: "1d",
+                  value: get_current_lifetime(new_vmname),
                 },
                 {
                   key: "created_by",
-                  value: "Tanisha",
+                  value: get_current_user(new_vmname),
                 },
                 {
                   key: "job_url",
-                  value: "",
+                  value: get_current_job_url(new_vmname),
                 },
                 {
                   key: "organization",
@@ -221,21 +234,51 @@ module Vmpooler
               monitoring: {:enabled => true},
               key_name: 'always-be-scheduling',
               security_group_ids: ['sg-697fb015'],
-              instance_type: pool['amisize'],
+              instance_type: amisize(pool_name),
               disable_api_termination: false,
               instance_initiated_shutdown_behavior: 'terminate',
               tag_specifications: tag,
               subnet_id: subnet_id
           }
     
-        #  if volume_size
-        #    config[:block_device_mappings] = get_block_device_mappings(image_id, volume_size)
-        #  end          
+          if volume_size(pool_name)
+            config[:block_device_mappings] = get_block_device_mappings(config['image_id'], volume_size(pool_name))
+          end
 
           debug_logger('trigger insert_instance')
-          result = connection.create_instances(config)
-#          created_instance = get_vm(pool_name, new_vmname          
-#          created_instance
+          batch_instance = connection.create_instances(config)
+          instance_id = batch_instance.first.instance_id
+          connection.client.wait_until(:instance_running, {instance_ids: [instance_id]}, {max_attempts: 10})
+          created_instance = get_vm(pool_name, new_vmname)
+          created_instance
+        end
+
+        def get_block_device_mappings(image_id, volume_size)
+          ec2_client = connection.client
+          image = ec2_client.describe_images(:image_ids => [image_id]).images.first
+          raise RuntimeError, "Image not found: #{image_id}" if image.nil?
+          # Transform the images block_device_mappings output into a format
+          # ready for a create.
+          block_device_mappings = []
+          if image.root_device_type == "ebs"
+            orig_bdm = image.block_device_mappings
+            orig_bdm.each do |block_device|
+              block_device_mappings << {
+                :device_name => block_device.device_name,
+                :ebs => {
+                  # Change the default size of the root volume.
+                  :volume_size => volume_size,
+                  # This is required to override the images default for
+                  # delete_on_termination, forcing all volumes to be deleted once the
+                  # instance is terminated.
+                  :delete_on_termination => true
+                }
+              }
+            end
+          else
+            raise "#{image_id} does not have an ebs root device type"
+          end
+          block_device_mappings
         end
 
         # create_disk creates an additional disk for an existing VM. It will name the new
@@ -637,6 +680,20 @@ module Vmpooler
           end
         end
 
+        def get_current_lifetime(vm_name)
+          @redis.with_metrics do |redis|
+            lifetime = redis.hget("vmpooler__vm__#{vm_name}", 'lifetime') || '1h'
+            return lifetime
+          end
+        end
+
+        def get_current_job_url(vm_name)
+          @redis.with_metrics do |redis|
+            job = redis.hget("vmpooler__vm__#{vm_name}", 'tag:jenkins_build_url') || ''
+            return job
+          end
+        end
+
         # Compute resource wait for operation to be DONE (synchronous operation)
         def wait_for_zone_operation(project, zone, result, retries = 5)
           while result.status != 'DONE'
@@ -672,23 +729,21 @@ module Vmpooler
         end
 
         # Return a hash of VM data
-        # Provides vmname, hostname, template, poolname, boottime, status, zone, machine_type, labels, label_fingerprint, ip information
+        # Provides name, template, poolname, boottime, status, image_size, private_ip_address
         def generate_vm_hash(vm_object, pool_name)
           pool_configuration = pool_config(pool_name)
           return nil if pool_configuration.nil?
 
           {
-            'name' => vm_object.name,
-            'hostname' => vm_object.hostname,
+            'name' => vm_object.tags.detect {|f| f.key == 'vm_name' }&.value,
+            #'hostname' => vm_object.hostname,
             'template' => pool_configuration&.key?('template') ? pool_configuration['template'] : nil, # was expecting to get it from API, not from config, but this is what vSphere does too!
-            'poolname' => vm_object.labels&.key?('pool') ? vm_object.labels['pool'] : nil,
-            'boottime' => vm_object.creation_timestamp,
-            'status' => vm_object.status, # One of the following values: PROVISIONING, STAGING, RUNNING, STOPPING, SUSPENDING, SUSPENDED, REPAIRING, and TERMINATED
-            'zone' => vm_object.zone,
-            'machine_type' => vm_object.machine_type,
-            'labels' => vm_object.labels,
-            'label_fingerprint' => vm_object.label_fingerprint,
-            'ip' => vm_object.network_interfaces ? vm_object.network_interfaces.first.network_ip : nil
+            'poolname' => vm_object.tags.detect {|f| f.key == 'pool' }&.value,
+            'boottime' => vm_object.launch_time,
+            'status' => vm_object.state.name, # One of the following values: pending, running, shutting-down, terminated, stopping, stopped
+            #'zone' => vm_object.zone,
+            'image_size' => vm_object.instance_type,
+            'private_ip_address' => vm_object.private_ip_address
           }
         end
 
