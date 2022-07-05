@@ -153,22 +153,15 @@ module Vmpooler
         def get_vm(pool_name, vm_name)
           debug_logger('get_vm')
           vm_hash = nil
-          begin
-            filters = [{
-              name: "tag:vm_name",
-              values: [vm_name],
-            }]
-            instances = connection.instances(filters: filters)
-          rescue ::Aws::EC2::ClientError => e
-            raise e unless e.status_code == 404
 
-            # swallow the ClientError error 404 and return nil when the VM was not found
-            return nil
-          end
+          filters = [{
+            name: "tag:vm_name",
+            values: [vm_name],
+          }]
+          instances = connection.instances(filters: filters).first
+          return vm_hash if instances.nil?
 
-          return vm_hash if instances.size.nil? || instances.size == 0
-
-          vm_hash = generate_vm_hash(instances.first, pool_name)
+          vm_hash = generate_vm_hash(instances, pool_name)
           debug_logger("vm_hash #{vm_hash}")
           vm_hash
         end
@@ -248,7 +241,7 @@ module Vmpooler
           debug_logger('trigger insert_instance')
           batch_instance = connection.create_instances(config)
           instance_id = batch_instance.first.instance_id
-          connection.client.wait_until(:instance_running, {instance_ids: [instance_id]}, {max_attempts: 10})
+          connection.client.wait_until(:instance_running, {instance_ids: [instance_id]})
           created_instance = get_vm(pool_name, new_vmname)
           created_instance
         end
@@ -288,7 +281,7 @@ module Vmpooler
         # #{vm_name}-disk1 == additional disk added via create_disk
         # #{vm_name}-disk2 == additional disk added via create_disk if run a second time etc
         # the new disk has labels added for vm and pool
-        # The GCE lifecycle is to create a new disk (lives independently of the instance) then to attach
+        # The AWS lifecycle is to create a new disk (lives independently of the instance) then to attach
         # it to the existing instance.
         # inputs
         #   [String] pool_name  : Name of the pool
@@ -301,38 +294,54 @@ module Vmpooler
           pool = pool_config(pool_name)
           raise("Pool #{pool_name} does not exist for the provider #{name}") if pool.nil?
 
-          begin
-            vm_object = connection.get_instance(project, zone(pool_name), vm_name)
-          rescue ::Google::Apis::ClientError => e
-            raise e unless e.status_code == 404
+          filters = [{
+                       name: "tag:vm_name",
+                       values: [vm_name],
+                     }]
+          instances = connection.instances(filters: filters).first
+          raise("VM #{vm_name} in pool #{pool_name} does not exist for the provider #{name}") if instances.nil?
 
-            # if it does not exist
-            raise("VM #{vm_name} in pool #{pool_name} does not exist for the provider #{name}")
-          end
           # this number should start at 1 when there is only the boot disk,
           # eg the new disk will be named spicy-proton-disk1
-          number_disk = vm_object.disks.length
+          number_disk = instances.block_device_mappings.length
 
           disk_name = "#{vm_name}-disk#{number_disk}"
-          disk = Google::Apis::ComputeV1::Disk.new(
-            name: disk_name,
-            size_gb: disk_size,
-            labels: { 'pool' => pool_name, 'vm' => vm_name }
-          )
+          disk = {
+            availability_zone: zone(pool_name),
+            size: disk_size,
+            tag_specifications: [
+              {
+                resource_type: "volume",
+                tags: [
+                  {
+                    key: "pool",
+                    value: pool_name,
+                  },
+                  {
+                    key: "vm",
+                    value: vm_name,
+                  },
+                  {
+                    key: "disk_name",
+                    value: disk_name,
+                  }
+               ]
+              }
+            ],
+          }
           debug_logger("trigger insert_disk #{disk_name} for #{vm_name}")
-          result = connection.insert_disk(project, zone(pool_name), disk)
-          wait_for_operation(project, pool_name, result)
-          debug_logger("trigger get_disk #{disk_name} for #{vm_name}")
-          new_disk = connection.get_disk(project, zone(pool_name), disk_name)
-
-          attached_disk = Google::Apis::ComputeV1::AttachedDisk.new(
-            auto_delete: true,
-            boot: false,
-            source: new_disk.self_link
-          )
+          volume = connection.create_volume(disk)
+          #      Aws::EC2::Errors::UnauthorizedOperation:
+          #        You are not authorized to perform this operation.
+          connection.client.wait_until(:volume_available, {volume_ids: [volume.id]})
           debug_logger("trigger attach_disk #{disk_name} for #{vm_name}")
-          result = connection.attach_disk(project, zone(pool_name), vm_object.name, attached_disk)
-          wait_for_operation(project, pool_name, result)
+          volume = instances.attach_volume(
+            {
+              device: "/dev/xvdb",
+              volume_id: volume.id
+            }
+          )
+          connection.client.wait_until(:volume_in_use, {volume_ids: [volume.id]})
           true
         end
 
@@ -341,7 +350,7 @@ module Vmpooler
         # since the snapshot resource needs a unique name in the gce project,
         # we create a unique name by concatenating {new_snapshot_name}-#{disk.name}
         # the disk name is based on vm_name which makes it unique.
-        # The snapshot is added labels snapshot_name, vm, pool, diskname and boot
+        # The snapshot is added tags snapshot_name, vm, pool, diskname and boot
         # inputs
         #   [String] pool_name  : Name of the pool
         #   [String] vm_name    : Name of the existing VM
@@ -353,52 +362,58 @@ module Vmpooler
         #   RuntimeError if the snapshot_name already exists for this VM
         def create_snapshot(pool_name, vm_name, new_snapshot_name)
           debug_logger('create_snapshot')
-          begin
-            vm_object = connection.get_instance(project, zone(pool_name), vm_name)
-          rescue ::Google::Apis::ClientError => e
-            raise e unless e.status_code == 404
-
-            # if it does not exist
-            raise("VM #{vm_name} in pool #{pool_name} does not exist for the provider #{name}")
-          end
+          filters = [{
+                       name: "tag:vm_name",
+                       values: [vm_name],
+                     }]
+          instances = connection.instances(filters: filters).first
+          raise("VM #{vm_name} in pool #{pool_name} does not exist for the provider #{name}") if instances.nil?
 
           old_snap = find_snapshot(vm_name, new_snapshot_name)
-          raise("Snapshot #{new_snapshot_name} for VM #{vm_name} in pool #{pool_name} already exists for the provider #{name}") unless old_snap.nil?
+          raise("Snapshot #{new_snapshot_name} for VM #{vm_name} in pool #{pool_name} already exists for the provider #{name}") unless old_snap.first.nil?
 
           result_list = []
-          vm_object.disks.each do |attached_disk|
-            disk_name = disk_name_from_source(attached_disk)
-            snapshot_obj = ::Google::Apis::ComputeV1::Snapshot.new(
-              name: "#{new_snapshot_name}-#{disk_name}",
-              labels: {
-                'snapshot_name' => new_snapshot_name,
-                'vm' => vm_name,
-                'pool' => pool_name,
-                'diskname' => disk_name,
-                'boot' => attached_disk.boot.to_s
-              }
-            )
-            debug_logger("trigger async create_disk_snapshot #{vm_name}: #{new_snapshot_name}-#{disk_name}")
-            result = connection.create_disk_snapshot(project, zone(pool_name), disk_name, snapshot_obj)
-            # do them all async, keep a list, check later
-            result_list << result
-          end
-          # now check they are done
-          result_list.each do |result|
-            wait_for_operation(project, pool_name, result)
+          instances.block_device_mappings.each do |attached_disk|
+            volume_id = attached_disk.ebs.volume_id
+
+            snapshot = connection.create_snapshot({
+             description: new_snapshot_name,
+             volume_id: volume_id,
+             tag_specifications: [
+               {
+                 resource_type: "snapshot", # accepts capacity-reservation, client-vpn-endpoint, customer-gateway, carrier-gateway, dedicated-host, dhcp-options, egress-only-internet-gateway, elastic-ip, elastic-gpu, export-image-task, export-instance-task, fleet, fpga-image, host-reservation, image, import-image-task, import-snapshot-task, instance, instance-event-window, internet-gateway, ipam, ipam-pool, ipam-scope, ipv4pool-ec2, ipv6pool-ec2, key-pair, launch-template, local-gateway, local-gateway-route-table, local-gateway-virtual-interface, local-gateway-virtual-interface-group, local-gateway-route-table-vpc-association, local-gateway-route-table-virtual-interface-group-association, natgateway, network-acl, network-interface, network-insights-analysis, network-insights-path, network-insights-access-scope, network-insights-access-scope-analysis, placement-group, prefix-list, replace-root-volume-task, reserved-instances, route-table, security-group, security-group-rule, snapshot, spot-fleet-request, spot-instances-request, subnet, subnet-cidr-reservation, traffic-mirror-filter, traffic-mirror-session, traffic-mirror-target, transit-gateway, transit-gateway-attachment, transit-gateway-connect-peer, transit-gateway-multicast-domain, transit-gateway-route-table, volume, vpc, vpc-endpoint, vpc-endpoint-service, vpc-peering-connection, vpn-connection, vpn-gateway, vpc-flow-log
+                 tags: [
+                   {
+                     key: "vm_name",
+                     value: vm_name,
+                   },
+                   {
+                     key: "pool_name",
+                     value: pool_name,
+                   },
+                   {
+                     key: "new_snapshot_name",
+                     value: new_snapshot_name,
+                   },
+                 ],
+               },
+             ]
+            })
+            #     Aws::EC2::Errors::UnauthorizedOperation:
+            #        You are not authorized to perform this operation.
           end
           true
         end
 
         # revert_snapshot reverts an existing VM's disks to an existing snapshot_name
-        # reverting in gce entails
+        # reverting in aws entails
         # 1. shutting down the VM,
         # 2. detaching and deleting the drives,
         # 3. creating new disks with the same name from the snapshot for each disk
         # 4. attach disks and start instance
         # for one vm, there might be multiple snapshots in time. We select the ones referred to by the
         # snapshot_name, but that may be multiple snapshots, one for each disks
-        # The new disk is added labels vm and pool
+        # The new disk is added tags vm and pool
         # inputs
         #   [String] pool_name  : Name of the pool
         #   [String] vm_name    : Name of the existing VM
@@ -420,7 +435,7 @@ module Vmpooler
           end
 
           snapshot_object = find_snapshot(vm_name, snapshot_name)
-          raise("Snapshot #{snapshot_name} for VM #{vm_name} in pool #{pool_name} does not exist for the provider #{name}") if snapshot_object.nil?
+          raise("Snapshot #{snapshot_name} for VM #{vm_name} in pool #{pool_name} does not exist for the provider #{name}") if snapshot_object.first.nil?
 
           # Shutdown instance
           debug_logger("trigger stop_instance #{vm_name}")
@@ -480,60 +495,39 @@ module Vmpooler
         def destroy_vm(pool_name, vm_name)
           debug_logger('destroy_vm')
           deleted = false
+
+          filters = [{
+                       name: "tag:vm_name",
+                       values: [vm_name],
+                     }]
+          instances = connection.instances(filters: filters).first
+          return true if instances.nil?
+
+          debug_logger("trigger delete_instance #{vm_name}")
+          # vm_hash = get_vm(pool_name, vm_name)
+          instances.terminate
           begin
-            connection.get_instance(project, zone(pool_name), vm_name)
-          rescue ::Google::Apis::ClientError => e
-            raise e unless e.status_code == 404
-
-            # If a VM doesn't exist then it is effectively deleted
+            connection.client.wait_until(:instance_terminated, {instance_ids: [instances.id]})
             deleted = true
-            debug_logger("instance #{vm_name} already deleted")
+          rescue ::Aws::Waiters::Errors => error
+            debug_logger("failed waiting for instance terminated #{vm_name}")
           end
 
-          unless deleted
-            debug_logger("trigger delete_instance #{vm_name}")
-            vm_hash = get_vm(pool_name, vm_name)
-            result = connection.delete_instance(project, zone(pool_name), vm_name)
-            wait_for_operation(project, pool_name, result, 10)
-            dns_teardown(vm_hash)
-          end
-
-          # list and delete any leftover disk, for instance if they were detached from the instance
-          filter = "(labels.vm = #{vm_name})"
-          disk_list = connection.list_disks(project, zone(pool_name), filter: filter)
-          result_list = []
-          disk_list.items&.each do |disk|
-            debug_logger("trigger delete_disk #{disk.name}")
-            result = connection.delete_disk(project, zone(pool_name), disk.name)
-            # do them all async, keep a list, check later
-            result_list << result
-          end
-          # now check they are done
-          result_list.each do |r|
-            wait_for_operation(project, pool_name, r)
-          end
-
-          # list and delete leftover snapshots, this could happen if snapshots were taken,
-          # as they are not removed when the original disk is deleted or the instance is detroyed
-          snapshot_list = find_all_snapshots(vm_name)
-          result_list = []
-          snapshot_list&.each do |snapshot|
-            debug_logger("trigger delete_snapshot #{snapshot.name}")
-            result = connection.delete_snapshot(project, snapshot.name)
-            # do them all async, keep a list, check later
-            result_list << result
-          end
-          # now check they are done
-          result_list.each do |r|
-            wait_for_operation(project, pool_name, r)
-          end
-          true
+          return deleted
         end
 
+        # check if a vm is ready by opening a socket on port 22
+        # if a domain is set, it will use vn_name.domain,
+        # if not then it will use the ip directly (AWS workaround)
         def vm_ready?(_pool_name, vm_name)
           begin
             # TODO: we could use a healthcheck resource attached to instance
-            open_socket(vm_name, domain || global_config[:config]['domain'])
+            domain_set = domain || global_config[:config]['domain']
+            if domain_set.nil?
+              vm_ip = get_vm(_pool_name, vm_name)['private_ip_address']
+              vm_name = vm_ip unless vm_ip.nil?
+            end
+            open_socket(vm_name, domain_set)
           rescue StandardError => _e
             return false
           end
@@ -694,40 +688,6 @@ module Vmpooler
           end
         end
 
-        # Compute resource wait for operation to be DONE (synchronous operation)
-        def wait_for_zone_operation(project, zone, result, retries = 5)
-          while result.status != 'DONE'
-            result = connection.wait_zone_operation(project, zone, result.name)
-            debug_logger("  -> wait_for_zone_operation status #{result.status} (#{result.name})")
-          end
-          if result.error # unsure what kind of error can be stored here
-            error_message = ''
-            # array of errors, combine them all
-            result.error.errors.each do |error|
-              error_message = "#{error_message} #{error.code}:#{error.message}"
-            end
-            raise "Operation: #{result.description} failed with error: #{error_message}"
-          end
-          result
-        rescue Google::Apis::TransmissionError => e
-          # Error returned once timeout reached, each retry typically about 1 minute.
-          if retries.positive?
-            retries -= 1
-            retry
-          end
-          raise
-        rescue Google::Apis::ClientError => e
-          raise e unless e.status_code == 404
-
-          # if the operation is not found, and we are 'waiting' on it, it might be because it
-          # is already finished
-          puts "waited on #{result.name} but was not found, so skipping"
-        end
-
-        def wait_for_operation(project, pool_name, result, retries = 5)
-          wait_for_zone_operation(project, zone(pool_name), result, retries)
-        end
-
         # Return a hash of VM data
         # Provides name, template, poolname, boottime, status, image_size, private_ip_address
         def generate_vm_hash(vm_object, pool_name)
@@ -792,9 +752,17 @@ module Vmpooler
         # this is used because for one vm, with the same snapshot name there could be multiple snapshots,
         # one for each disk
         def find_snapshot(vm_name, snapshotname)
-          filter = "(labels.vm = #{vm_name}) AND (labels.snapshot_name = #{snapshotname})"
-          snapshot_list = connection.list_snapshots(project, filter: filter)
-          snapshot_list.items # array of snapshot objects
+          filters = [
+            {
+              name: "tag:vm_name",
+              values: [vm_name],
+            },
+            {
+              name: "tag:snapshot_name",
+              values: [snapshotname],
+            },
+          ]
+          snapshot_list = connection.snapshots({filters: filters})
         end
 
         # find all snapshots ever created for one vm,
