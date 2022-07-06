@@ -19,7 +19,7 @@ MockOperationErrorError = Struct.new(
 
 MockInstance = Struct.new(
   # https://docs.aws.amazon.com/sdk-for-ruby/v3/api/Aws/EC2/Instance.html
-  :instance_type, :launch_time, :private_ip_address, :state, :tags, :zone,
+  :instance_type, :launch_time, :private_ip_address, :state, :tags, :zone, :private_dns_name,
   keyword_init: true
 )
 

@@ -33,7 +33,6 @@ describe 'Vmpooler::PoolManager::Provider::Aws' do
       timeout: 10
       ready_ttl: 1440
       provider: 'aws'
-      provision: true
 EOT
     )
   }
@@ -54,7 +53,10 @@ EOT
 
   describe '#manual tests live' do
     context 'in itsysops' do
-      before(:each) { allow(subject).to receive(:dns).and_call_original }
+      before(:each) {
+        config['provision'] = "true"
+        allow(subject).to receive(:dns).and_call_original
+      }
       let(:vmname) { "instance-46" }
       let(:poolname) { "ubuntu-2004-arm64" }
       skip 'gets a vm' do

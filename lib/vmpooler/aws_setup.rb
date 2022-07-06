@@ -1,15 +1,17 @@
+# frozen_string_literal: true
+
 require 'net/ssh'
-# This class connects to existing running VMs via NET:SSH
-# it uses a local key to do so and then setup SSHD on the hosts to enable
-# dev and CI users to connect.
 module Vmpooler
   class PoolManager
+    # This class connects to existing running VMs via NET:SSH
+    # it uses a local key to do so and then setup SSHD on the hosts to enable
+    # dev and CI users to connect.
     class AwsSetup
-      ROOT_KEYS_SCRIPT = ENV["ROOT_KEYS_SCRIPT"]
+      ROOT_KEYS_SCRIPT = ENV['ROOT_KEYS_SCRIPT']
       ROOT_KEYS_SYNC_CMD = "curl -k -o - -L #{ROOT_KEYS_SCRIPT} | %s"
 
       def self.setup_node_by_ssh(host, platform)
-        @key_file = ENV["KEY_FILE_LOCATION"] || '/app/abs/.ssh/abs-aws-ec2.rsa'
+        @key_file = ENV['KEY_FILE_LOCATION'] || '/app/abs/.ssh/abs-aws-ec2.rsa'
         conn = check_ssh_accepting_connections(host, platform)
         configure_host(host, platform, conn)
       end
@@ -30,15 +32,14 @@ module Vmpooler
 
       def self.get_user(platform)
         if platform =~ /centos/
-          user = 'centos'
+          'centos'
         elsif platform =~ /ubuntu/
-          user = 'ubuntu'
+          'ubuntu'
         elsif platform =~ /debian/
-          user = 'root'
+          'root'
         else
-          user = 'ec2-user'
+          'ec2-user'
         end
-        user
       end
 
       def self.check_ssh_accepting_connections(host, platform)
@@ -46,10 +47,9 @@ module Vmpooler
         begin
           user = get_user(platform)
           netssh_jruby_workaround
-          conn = Net::SSH.start(host, user, :keys => @key_file, :timeout => 10)
-          return conn
-        rescue Net::SSH::ConnectionTimeout, Errno::ECONNREFUSED => err
-          puts "Requested instances do not have sshd ready yet, try again: #{err}"
+          Net::SSH.start(host, user, keys: @key_file, timeout: 10)
+        rescue Net::SSH::ConnectionTimeout, Errno::ECONNREFUSED => e
+          puts "Requested instances do not have sshd ready yet, try again: #{e}"
           sleep 1
           retry if (retries += 1) < 300
         end
@@ -73,6 +73,7 @@ module Vmpooler
         ssh.open_channel do |channel|
           channel.request_pty do |ch, success|
             raise "can't get pty request" unless success
+
             if platform =~ /centos|el-|redhat|fedora|eos|amazon/
               ch.exec('sudo -E /sbin/service sshd reload')
             elsif platform =~ /debian|ubuntu|cumulus/
@@ -87,13 +88,13 @@ module Vmpooler
         ssh.loop
       end
 
-      def self.sync_root_keys(host, platform)
-        unless ROOT_KEYS_SCRIPT.nil?
-          user = "root"
-          netssh_jruby_workaround
-          Net::SSH.start(host, user, :keys => @key_file) do |ssh|
-            ssh.exec!(ROOT_KEYS_SYNC_CMD % "env PATH=\"/usr/gnu/bin:$PATH\" bash")
-          end
+      def self.sync_root_keys(host, _platform)
+        return if ROOT_KEYS_SCRIPT.nil?
+
+        user = 'root'
+        netssh_jruby_workaround
+        Net::SSH.start(host, user, keys: @key_file) do |ssh|
+          ssh.exec!(ROOT_KEYS_SYNC_CMD % 'env PATH="/usr/gnu/bin:$PATH" bash')
         end
       end
 
@@ -101,7 +102,7 @@ module Vmpooler
       # https://github.com/jruby/jruby-openssl/issues/105
       # this will turn off some algos that match /^ecd(sa|h)-sha2/
       def self.netssh_jruby_workaround
-        Net::SSH::Transport::Algorithms::ALGORITHMS.values.each { |algs| algs.reject! { |a| a =~ /^ecd(sa|h)-sha2/ } }
+        Net::SSH::Transport::Algorithms::ALGORITHMS.each_value { |algs| algs.reject! { |a| a =~ /^ecd(sa|h)-sha2/ } }
         Net::SSH::KnownHosts::SUPPORTED_TYPE.reject! { |t| t =~ /^ecd(sa|h)-sha2/ }
       end
     end

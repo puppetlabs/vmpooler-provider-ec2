@@ -51,3 +51,5 @@ Layout/LineLength:
   Enabled: false
 Metrics/BlockLength:
   Enabled: false
+Style/CaseLikeIf:
+  Enabled: false
