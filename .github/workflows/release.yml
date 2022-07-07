@@ -5,13 +5,13 @@ on: workflow_dispatch
 jobs:
   release:
     runs-on: ubuntu-latest
-    if: github.repository == 'puppetlabs/vmpooler-provider-aws'
+    if: github.repository == 'puppetlabs/vmpooler-provider-ec2'
     steps:
       - uses: actions/checkout@v2
       - name: Get Version
         id: gv
         run: |
-          echo "::set-output name=ver::$(grep VERSION lib/vmpooler-provider-aws/version.rb |rev |cut -d "'" -f2 |rev)"
+          echo "::set-output name=ver::$(grep VERSION lib/vmpooler-provider-ec2/version.rb |rev |cut -d "'" -f2 |rev)"
       - name: Tag Release
         uses: ncipollo/release-action@v1
         with:

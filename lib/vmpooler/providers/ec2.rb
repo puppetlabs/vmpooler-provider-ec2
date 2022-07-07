@@ -10,7 +10,7 @@ module Vmpooler
   class PoolManager
     class Provider
       # This class represent a GCE provider to CRUD resources in a gce cloud.
-      class Aws < Vmpooler::PoolManager::Provider::Base
+      class Ec2 < Vmpooler::PoolManager::Provider::Base
         # The connection_pool method is normally used only for testing
         attr_reader :connection_pool
 
@@ -51,7 +51,7 @@ module Vmpooler
 
         # name of the provider class
         def name
-          'aws'
+          'ec2'
         end
 
         def connection

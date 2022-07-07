@@ -1,15 +1,15 @@
 lib = File.expand_path('../lib', __FILE__)
 $LOAD_PATH.unshift(lib) unless $LOAD_PATH.include?(lib)
-require 'vmpooler-provider-aws/version'
+require 'vmpooler-provider-ec2/version'
 
 Gem::Specification.new do |s|
-  s.name          = 'vmpooler-provider-aws'
-  s.version       = VmpoolerProviderAws::VERSION
+  s.name          = 'vmpooler-provider-ec2'
+  s.version       = VmpoolerProviderEc2::VERSION
   s.authors       = ['Puppet']
   s.email         = ['support@puppet.com']
 
-  s.summary       = 'AWS provider for VMPooler'
-  s.homepage      = 'https://github.com/puppetlabs/vmpooler-provider-aws'
+  s.summary       = 'EC2 provider for VMPooler'
+  s.homepage      = 'https://github.com/puppetlabs/vmpooler-provider-ec2'
   s.license       = 'Apache-2.0'
   s.required_ruby_version = Gem::Requirement.new('>= 2.3.0')
 

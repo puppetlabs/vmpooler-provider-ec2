@@ -1,9 +1,9 @@
 require 'rspec'
 
-describe 'VmpoolerProviderAws' do
+describe 'VmpoolerProviderEc2' do
   context 'when creating class ' do
     it 'sets a version' do
-      expect(VmpoolerProviderAws::VERSION).not_to be_nil
+      expect(VmpoolerProviderEc2::VERSION).not_to be_nil
     end
   end
 end

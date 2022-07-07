@@ -138,7 +138,7 @@
 #
 #   Provider specific pool settings
 #
-#     AWS provider
+#     EC2 provider
 #     - zone
 #       The zone to create the VMs in
 #       (optional: default is global provider zone value)

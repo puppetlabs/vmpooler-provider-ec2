@@ -1,13 +1,13 @@
 require 'spec_helper'
 require 'mock_redis'
 require 'ec2_helper'
-require 'vmpooler/providers/aws'
+require 'vmpooler/providers/ec2'
 
 RSpec::Matchers.define :relocation_spec_with_host do |value|
   match { |actual| actual[:spec].host == value }
 end
 
-describe 'Vmpooler::PoolManager::Provider::Aws' do
+describe 'Vmpooler::PoolManager::Provider::Ec2' do
   let(:logger) { MockLogger.new }
   let(:metrics) { Vmpooler::Metrics::DummyStatsd.new }
   let(:poolname) { 'debian-9' }
@@ -20,7 +20,7 @@ describe 'Vmpooler::PoolManager::Provider::Aws' do
     max_tries: 3
     retry_factor: 10
   :providers:
-    :aws:
+    :ec2:
       connection_pool_timeout: 1
       zone: '#{zone}'
       region: '#{region}'
@@ -32,7 +32,7 @@ describe 'Vmpooler::PoolManager::Provider::Aws' do
       size: 5
       timeout: 10
       ready_ttl: 1440
-      provider: 'aws'
+      provider: 'ec2'
 EOT
     )
   }
@@ -49,7 +49,7 @@ EOT
     ) { MockRedis.new }
   end
 
-  subject { Vmpooler::PoolManager::Provider::Aws.new(config, logger, metrics, redis_connection_pool, 'aws', provider_options) }
+  subject { Vmpooler::PoolManager::Provider::Ec2.new(config, logger, metrics, redis_connection_pool, 'ec2', provider_options) }
 
   describe '#manual tests live' do
     context 'in itsysops' do

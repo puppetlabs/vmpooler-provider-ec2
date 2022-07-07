@@ -9,3 +9,4 @@ results.xml
 /vmpooler.yaml
 .idea
 *.json
+.secrets/
