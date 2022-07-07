@@ -1,0 +1,165 @@
+---
+:providers:
+# :providers:
+#
+# This section contains the VM providers for VMs and Pools
+# The currently supported backing services are:
+# - vsphere
+# - dummy
+# - gce
+# - aws
+#
+#   - provider_class
+#     For multiple providers, specify one of the supported backing services (vsphere or dummy or gce or aws)
+#     (optional: will default to it's parent :key: name eg. 'aws')
+#
+#   - purge_unconfigured_resources
+#     Enable purging of VMs, disks and snapshots
+#     By default will purge resources in the project without a "pool" label, or a "pool" label with the value for an unconfigured pool
+#     An optional allowlist can be provided to ignore purging certain VMs based on pool labels
+#     Setting this on the provider will enable purging for the provider
+#     Expects a boolean value
+#     (optional; default: false)
+#
+#   - resources_allowlist
+#     For GCE: Specify labels that should be ignored when purging VMs. For example if a VM's label is
+#     set to 'pool' with value 'donotdelete' and there is no pool with that name configured, it would normally be purged,
+#     unless you add a resources_allowlist "donotdelete" in which case it is ignored and not purged.
+#     Additionally the "" (empty string) has a special meaning whereas VMs that do not have the "pool" label are not purged.
+#     Additionally if you want to ignore VM's with an arbitrary label, include it in the allow list as a string with the separator "="
+#     between the label name and value eg user=bob would ignore VMs that include the label "user" with the value "bob"
+#     If any one of the above condition is met, the resource is ignored and not purged
+#     This option is only evaluated when 'purge_unconfigured_resources' is enabled
+#     Expects an array of strings specifying the allowlisted labels by name. The strings should be all lower case, since
+#     no uppercase char is allowed in a label
+#     (optional; default: nil)
+#
+# If you want to support more than one provider with different parameters you have to specify the
+# backing service in the provider_class configuration parameter for example 'vsphere' or 'dummy'. Each pool can specify
+# the provider to use.
+#
+# Multiple providers example:
+
+  :aws1:
+    provider_class: 'aws'
+    zone: 'us-west-2b'
+    region: 'us-west'
+  :aws2:
+    provider_class: 'aws'
+    zone: 'us-west-2b'
+    region: 'us-west'
+    resources_allowlist:
+      - "user=bob"
+      - ""
+      - "custom-pool"
+
+# :aws:
+#
+# This section contains the global variables for the aws provider
+# some of them can be overwritten at the pool level
+#
+# Available configuration parameters:
+#
+#   - region
+#     The AWS region name to use when creating/deleting resources
+#     (required)
+#   - zone
+#     The AWS zone name to use when creating/deleting resources (vms, disks etc)
+#     Can be overwritten at the pool level
+#     (required)
+#   - amisize
+#     The AMI machine type to use eg a1.large
+#     Can be overwritten at the pool level
+#     (required)
+#   - volume_size
+#     A custom root volume size to use in GB, the default is whatever the default for the AMI used is
+#     (optional)
+#   - dns_zone_resource_name
+#     The name given to the DNS zone ressource. This is not the domain, but the name identifier of a zone eg example-com
+#     (optional) when not set, the dns setup / teardown is skipped
+#   - domain
+#     Overwrites the global domain parameter. This should match the dns zone domain set for the dns_zone_resource_name.
+#     It is used to infer the domain part of the FQDN ie $vm_name.$domain
+#     When setting multiple providers at the same time, this value should be set for each GCE pools.
+#     (optional) If not explicitely set, the FQDN is inferred using the global 'domain' config parameter
+# Example:
+
+  :aws:
+    region: 'us-west'
+    zone: 'us-west-2b'
+    amisize: 'a1.small'
+    volume_size: '10'
+    dns_zone_resource_name: 'subdomain-example-com'
+    domain: 'subdomain.example.com'
+
+# :pools:
+#
+# This section contains a list of virtual machine 'pools' for vmpooler to
+# create and maintain.
+#
+# Available configuration parameters (per-pool):
+#
+#   - name
+#     The name of the pool.
+#     (required)
+#
+#   - alias
+#     Other names this pool can be requested as.
+#     (optional)
+#
+#   - template
+#     The template or virtual machine target to spawn clones from, in AWS this means an AMI id.
+#     (required)
+#
+#   - size
+#     The number of waiting VMs to keep in a pool.
+#     (required)
+#
+#   - provider
+#     The name of the VM provider which manage this pool.  This should match
+#     a name in the :providers: section above e.g. vsphere
+#     (required; will default to vsphere for backwards compatibility)
+#     If you have more than one provider, this is where you would choose which
+#     one to use for this pool
+#
+#   - timeout
+#     How long (in minutes) before marking a clone in 'pending' queues as 'failed' and retrying.
+#     This setting overrides any globally-configured timeout setting.
+#     (optional; default: '15')
+#
+#   - ready_ttl
+#     How long (in minutes) to keep VMs in 'ready' queues before destroying.
+#     (optional; default: no limit)
+#
+#   - check_loop_delay_min (optional; default: 5) seconds
+#   - check_loop_delay_max (optional; default: same as check_loop_delay_min) seconds
+#   - check_loop_delay_decay (optional; default: 2.0) Must be greater than 1.0
+#     See the :config: section for information about these settings
+#
+#   Provider specific pool settings
+#
+#     EC2 provider
+#     - zone
+#       The zone to create the VMs in
+#       (optional: default is global provider zone value)
+#     - amisize
+#       The AMI machine type to use eg a1.large
+#       (optional: default is global provider amisize value)
+#     - volume_size
+#       (optional: default is global provider amisize value)
+#     - provision
+#       Set to true to run the extra aws setup steps (SSH, keys etc) once the VM is available
+#       (optional: default to false)
+# Example:
+
+:pools:
+  - name: 'almalinux-x86_64'
+    alias: [ 'almalinux-64', 'almalinux-amd64' ]
+    template: 'ami-foobar1234'
+    size: 5
+    timeout: 15
+    ready_ttl: 1440
+    provider: aws
+    zone: 'us-new-zone'
+    amisize: 'a1.large'
+    volume_size: '20'
