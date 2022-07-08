@@ -53,16 +53,38 @@ EOT
 
   describe '#manual tests live' do
     context 'in itsysops' do
+      let(:vmname) { "instance-50" }
+      let(:poolname) { "ubuntu-2004-arm64" }
+      let(:config) { YAML.load(<<~EOT
+  ---
+  :config:
+    max_tries: 3
+    retry_factor: 10
+  :providers:
+    :ec2:
+      connection_pool_timeout: 1
+      zone: '#{zone}'
+      region: '#{region}'
+  :pools:
+    - name: '#{poolname}'
+      alias: [ 'mockpool' ]
+      amisize: 'a1.large'
+      template: 'ami-03c1b544a7566b3e5'
+      size: 5
+      timeout: 10
+      ready_ttl: 1440
+      provider: 'ec2'
+      provision: 'true'
+      EOT
+      )
+      }
       before(:each) {
-        config['provision'] = "true"
         allow(subject).to receive(:dns).and_call_original
       }
-      let(:vmname) { "instance-46" }
-      let(:poolname) { "ubuntu-2004-arm64" }
       skip 'gets a vm' do
-
-        # result = subject.create_vm(poolname, vmname)
-        subject.provision_node_aws("ip-10-227-4-27.amz-dev.puppet.net", poolname)
+        result = subject.create_vm(poolname, vmname)
+        #subject.vms_in_pool("amazon-6-x86_64-ec2")
+        #subject.provision_node_aws("ip-10-227-4-97.amz-dev.puppet.net", poolname)
         # subject.create_snapshot(poolname, vmname, "foo")
         #subject.create_disk(poolname, vmname, 10)
         # a = subject.destroy_vm(poolname, vmname)
