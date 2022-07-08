@@ -16,7 +16,7 @@ Gem::Specification.new do |s|
   s.files         = Dir[ "lib/**/*" ]
   s.require_paths = ["lib"]
   s.add_dependency 'aws-sdk-ec2', '~> 1'
-  s.add_dependency 'net-ssh', '>= 6.2', '< 7.1'
+  s.add_dependency 'net-ssh', '~> 6.2.0.rc2'
   
   s.add_development_dependency 'vmpooler', '>= 1.3.0', '~> 2.3'
 
