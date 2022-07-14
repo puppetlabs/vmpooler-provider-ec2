@@ -20,7 +20,7 @@ aws authorization is handled via two required ENV vars
 When you add the pool config `provision: true` to a pool, the new VMs will also get initialized with extra steps to setup the sshd config via NET:SSH
 These steps expect two environment vars
 1. ROOT_KEYS_SCRIPT: (optional) the URI location of a script (eg https in github) that will be run to setup keys. If not set, this will be skipped
-2. KEY_FILE_LOCATION: (required) the location on local disk where the ssh key resides for VMPooler to connect via SSH to the EC2 node
+2. AWS_KEY_FILE_LOCATION: (required) the location on local disk where the ssh key resides for VMPooler to connect via SSH to the EC2 node
 
 ### DNS
 AWS will setup a private ip and private dns hostname for the VM once running. Optionally we can setup a human readable DNS entry to resolve the VMPooler provider `spicy-proton` fqdn

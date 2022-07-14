@@ -17,8 +17,8 @@ module Vmpooler
         def initialize(config, logger, metrics, redis_connection_pool, name, options)
           super(config, logger, metrics, redis_connection_pool, name, options)
 
-          @aws_access_key = ENV['ABS_AWS_ACCESS_KEY']
-          @aws_secret_key = ENV['ABS_AWS_SECRET_KEY']
+          @aws_access_key = ENV['ABS_AWS_ACCESS_KEY'] || provider_config['ABS_AWS_ACCESS_KEY']
+          @aws_secret_key = ENV['ABS_AWS_SECRET_KEY'] || provider_config['ABS_AWS_SECRET_KEY']
 
           task_limit = global_config[:config].nil? || global_config[:config]['task_limit'].nil? ? 10 : global_config[:config]['task_limit'].to_i
           # The default connection pool size is:
@@ -123,10 +123,16 @@ module Vmpooler
           pool = pool_config(pool_name)
           raise("Pool #{pool_name} does not exist for the provider #{name}") if pool.nil?
 
-          filters = [{
-            name: 'tag:pool',
-            values: [pool_name]
-          }]
+          filters = [
+            {
+              name: 'tag:pool',
+              values: [pool_name]
+            },
+            {
+              name: 'instance-state-name',
+              values: %w[pending running shutting-down stopping stopped]
+            }
+          ]
           instance_list = connection.instances(filters: filters)
 
           return vms if instance_list.first.nil?

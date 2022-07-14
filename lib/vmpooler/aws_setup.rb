@@ -11,7 +11,7 @@ module Vmpooler
       ROOT_KEYS_SYNC_CMD = "curl -k -o - -L #{ROOT_KEYS_SCRIPT} | %s"
 
       def self.setup_node_by_ssh(host, platform)
-        @key_file = ENV['KEY_FILE_LOCATION'] || '/app/abs/.ssh/abs-aws-ec2.rsa'
+        @key_file = ENV['AWS_KEY_FILE_LOCATION']
         conn = check_ssh_accepting_connections(host, platform)
         configure_host(host, platform, conn)
       end
