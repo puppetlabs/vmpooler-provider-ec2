@@ -13,7 +13,11 @@ module Vmpooler
       def self.setup_node_by_ssh(host, platform)
         @key_file = ENV['AWS_KEY_FILE_LOCATION']
         conn = check_ssh_accepting_connections(host, platform)
-        configure_host(host, platform, conn) if conn
+        if conn
+          puts "#{host} connected"
+          configure_host(host, platform, conn)
+          puts "#{host} configured"
+        end
       end
 
       # For an Amazon Linux AMI, the user name is ec2-user.
@@ -49,16 +53,15 @@ module Vmpooler
           netssh_jruby_workaround
           Net::SSH.start(host, user, keys: @key_file, timeout: 10)
         rescue Net::SSH::ConnectionTimeout, Errno::ECONNREFUSED => e
-          puts "Requested instances do not have sshd ready yet, try again for 300s: #{e}"
+          puts "#{host} Requested instances do not have sshd ready yet, try again for 300s (#{retries}): #{e}"
           sleep 1
           retry if (retries += 1) < 300
         rescue Errno::EBADF => e
-          puts "Jruby error, try again for 30s: #{e}"
-          puts e.backtrace
+          puts "#{host} Jruby error, try again for 30s (#{retries}): #{e}"
           sleep 1
           retry if (retries += 1) < 30
         rescue StandardError => e
-          puts "Other error, cancelling aws_setup for #{host}: #{e}"
+          puts "#{host} Other error, cancelling aws_setup: #{e}"
           puts e.backtrace
           return nil
         end
