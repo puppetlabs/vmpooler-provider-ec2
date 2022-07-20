@@ -57,8 +57,8 @@ module Vmpooler
           sleep 1
           retry if (retries += 1) < 300
         rescue Errno::EBADF => e
-          puts "#{host} Jruby error, try again for 30s (#{retries}): #{e}"
-          sleep 1
+          puts "#{host} Jruby error, try again for 300s (#{retries}): #{e}"
+          sleep 10
           retry if (retries += 1) < 30
         rescue StandardError => e
           puts "#{host} Other error, cancelling aws_setup: #{e}"
