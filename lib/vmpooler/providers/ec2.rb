@@ -31,6 +31,7 @@ module Vmpooler
           # The default connection pool timeout should be quite large - 60 seconds
           connpool_timeout = provider_config['connection_pool_timeout'].nil? ? 60 : provider_config['connection_pool_timeout'].to_i
           logger.log('d', "[#{name}] ConnPool - Creating a connection pool of size #{connpool_size} with timeout #{connpool_timeout}")
+          @logger = logger
           @connection_pool = Vmpooler::PoolManager::GenericConnectionPool.new(
             metrics: metrics,
             connpool_type: 'provider_connection_pool',
@@ -223,10 +224,15 @@ module Vmpooler
                   key: 'portfolio',
                   value: 'ds-ci'
                 }
-
               ]
             }
           ]
+          if global_config[:config] && global_config[:config]['site_name']
+            tag.first[:tags] << {
+              key: 'Name',
+              value: global_config[:config]['site_name']
+            }
+          end
           config = {
             min_count: 1,
             max_count: 1,
@@ -250,13 +256,14 @@ module Vmpooler
           created_instance = get_vm(pool_name, new_vmname)
 
           # extra setup steps
-          provision_node_aws(created_instance['private_dns_name'], pool_name) if to_provision(pool_name) == 'true' || to_provision(pool_name) == true
+          provision_node_aws(created_instance['private_dns_name'], pool_name, new_vmname) if to_provision(pool_name) == 'true' || to_provision(pool_name) == true
 
           created_instance
         end
 
-        def provision_node_aws(vm, pool_name)
-          AwsSetup.setup_node_by_ssh(vm, pool_name)
+        def provision_node_aws(vm, pool_name, new_vmname)
+          aws_setup = AwsSetup.new(@logger, new_vmname)
+          aws_setup.setup_node_by_ssh(vm, pool_name)
         end
 
         def get_block_device_mappings(image_id, volume_size)
@@ -511,7 +518,7 @@ module Vmpooler
         def debug_logger(message, send_to_upstream: false)
           # the default logger is simple and does not enforce debug levels (the first argument)
           puts message if ENV['DEBUG_FLAG']
-          logger.log('[g]', message) if send_to_upstream
+          @logger.log('[g]', message) if send_to_upstream
         end
       end
     end
