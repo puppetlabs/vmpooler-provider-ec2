@@ -391,9 +391,10 @@ module Vmpooler
             # TODO: we could use a healthcheck resource attached to instance
             domain_set = domain || global_config[:config]['domain']
             if domain_set.nil?
-              vm_ip = get_vm(pool_name, vm_name)['private_ip_address']
+              vm_ip = get_vm(pool_name, vm_name)['private_dns_name']
               vm_name = vm_ip unless vm_ip.nil?
             end
+            @logger.log('s', "[>] [#{pool_name}] '#{vm_name}' vm_ready? #{domain_set} #{vm_ip}")
             open_socket(vm_name, domain_set)
           rescue StandardError => e
             @logger.log('s', "[!] [#{pool_name}] '#{vm_name}' instance cannot be reached by vmpooler on tcp port 22; #{e}")
