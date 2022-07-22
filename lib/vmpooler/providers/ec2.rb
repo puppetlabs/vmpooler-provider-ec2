@@ -395,7 +395,8 @@ module Vmpooler
               vm_name = vm_ip unless vm_ip.nil?
             end
             open_socket(vm_name, domain_set)
-          rescue StandardError => _e
+          rescue StandardError => e
+            @logger.log('s', "[!] [#{pool_name}] '#{vm_name}' instance cannot be reached by vmpooler on tcp port 22; #{e}")
             return false
           end
           true
