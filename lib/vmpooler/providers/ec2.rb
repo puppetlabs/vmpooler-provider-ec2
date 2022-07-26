@@ -205,11 +205,11 @@ module Vmpooler
                   value: pool_name
                 },
                 {
-                  key: 'lifetime',
+                  key: 'lifetime', # required by AWS reaper
                   value: get_current_lifetime(new_vmname)
                 },
                 {
-                  key: 'created_by',
+                  key: 'created_by', # required by AWS reaper
                   value: get_current_user(new_vmname)
                 },
                 {
@@ -217,22 +217,20 @@ module Vmpooler
                   value: get_current_job_url(new_vmname)
                 },
                 {
-                  key: 'organization',
+                  key: 'organization', # required by AWS reaper
                   value: 'engineering'
                 },
                 {
-                  key: 'portfolio',
+                  key: 'portfolio', # required by AWS reaper
                   value: 'ds-ci'
+                },
+                {
+                  key: 'Name',
+                  value: new_vmname
                 }
               ]
             }
           ]
-          if global_config[:config] && global_config[:config]['site_name']
-            tag.first[:tags] << {
-              key: 'Name',
-              value: global_config[:config]['site_name']
-            }
-          end
           config = {
             min_count: 1,
             max_count: 1,
@@ -447,10 +445,11 @@ module Vmpooler
           end
         end
 
+        # returns lifetime in hours in the format Xh defaults to 1h
         def get_current_lifetime(vm_name)
           @redis.with_metrics do |redis|
-            lifetime = redis.hget("vmpooler__vm__#{vm_name}", 'lifetime') || '1h'
-            return lifetime
+            lifetime = redis.hget("vmpooler__vm__#{vm_name}", 'lifetime') || '1'
+            return "#{lifetime}h"
           end
         end
 
