@@ -267,6 +267,7 @@ module Vmpooler
           @logger.log('s', "[>] [#{pool_name}] '#{new_vmname}' instance ready to accept traffic")
           created_instance = get_vm(pool_name, new_vmname)
 
+          @redis.hset("vmpooler__vm__#{new_vmname}", 'host', created_instance['name'])
           # extra setup steps
           provision_node_aws(created_instance['private_dns_name'], pool_name, new_vmname) if to_provision(pool_name) == 'true' || to_provision(pool_name) == true
 
