@@ -10,10 +10,19 @@ module Vmpooler
       ROOT_KEYS_SCRIPT = ENV['ROOT_KEYS_SCRIPT']
       ROOT_KEYS_SYNC_CMD = "curl -k -o - -L #{ROOT_KEYS_SCRIPT} | %s"
 
-      def self.setup_node_by_ssh(host, platform)
+      def initialize(logger, new_vmname)
+        @logger = logger
         @key_file = ENV['AWS_KEY_FILE_LOCATION']
+        @vm_name = new_vmname
+      end
+
+      def setup_node_by_ssh(host, platform)
         conn = check_ssh_accepting_connections(host, platform)
+        return unless conn
+
+        @logger.log('s', "[>] [#{platform}] '#{@vm_name}' net:ssh connected")
         configure_host(host, platform, conn)
+        @logger.log('s', "[>] [#{platform}] '#{@vm_name}' configured")
       end
 
       # For an Amazon Linux AMI, the user name is ec2-user.
@@ -30,7 +39,7 @@ module Vmpooler
       #
       #     For an Ubuntu AMI, the user name is ubuntu.
 
-      def self.get_user(platform)
+      def get_user(platform)
         if platform =~ /centos/
           'centos'
         elsif platform =~ /ubuntu/
@@ -42,22 +51,29 @@ module Vmpooler
         end
       end
 
-      def self.check_ssh_accepting_connections(host, platform)
+      def check_ssh_accepting_connections(host, platform)
         retries = 0
         begin
           user = get_user(platform)
           netssh_jruby_workaround
           Net::SSH.start(host, user, keys: @key_file, timeout: 10)
         rescue Net::SSH::ConnectionTimeout, Errno::ECONNREFUSED => e
-          puts "Requested instances do not have sshd ready yet, try again: #{e}"
+          @logger.log('s', "[>] [#{platform}] '#{@vm_name}' net:ssh requested instances do not have sshd ready yet, try again for 300s (#{retries}/300): #{e}")
           sleep 1
           retry if (retries += 1) < 300
+        rescue Errno::EBADF => e
+          @logger.log('s', "[>] [#{platform}] '#{@vm_name}' net:ssh jruby error, try again for 300s (#{retries}/30): #{e}")
+          sleep 10
+          retry if (retries += 1) < 30
+        rescue StandardError => e
+          @logger.log('s', "[>] [#{platform}] '#{@vm_name}' net:ssh other error, skipping aws_setup: #{e}")
+          puts e.backtrace
         end
       end
 
       # Configure the aws host by enabling root and setting the hostname
       # @param host [String] the internal dns name of the instance
-      def self.configure_host(host, platform, ssh)
+      def configure_host(host, platform, ssh)
         ssh.exec!('sudo cp -r .ssh /root/.')
         ssh.exec!("sudo sed -ri 's/^#?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config")
         ssh.exec!("sudo hostname #{host}")
@@ -69,7 +85,7 @@ module Vmpooler
         sync_root_keys(host, platform)
       end
 
-      def self.restart_sshd(host, platform, ssh)
+      def restart_sshd(host, platform, ssh)
         ssh.open_channel do |channel|
           channel.request_pty do |ch, success|
             raise "can't get pty request" unless success
@@ -88,7 +104,7 @@ module Vmpooler
         ssh.loop
       end
 
-      def self.sync_root_keys(host, _platform)
+      def sync_root_keys(host, _platform)
         return if ROOT_KEYS_SCRIPT.nil?
 
         user = 'root'
@@ -101,7 +117,7 @@ module Vmpooler
       # issue when using net ssh 6.1.0 with jruby
       # https://github.com/jruby/jruby-openssl/issues/105
       # this will turn off some algos that match /^ecd(sa|h)-sha2/
-      def self.netssh_jruby_workaround
+      def netssh_jruby_workaround
         Net::SSH::Transport::Algorithms::ALGORITHMS.each_value { |algs| algs.reject! { |a| a =~ /^ecd(sa|h)-sha2/ } }
         Net::SSH::KnownHosts::SUPPORTED_TYPE.reject! { |t| t =~ /^ecd(sa|h)-sha2/ }
       end

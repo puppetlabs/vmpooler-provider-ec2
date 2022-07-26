@@ -31,6 +31,7 @@ module Vmpooler
           # The default connection pool timeout should be quite large - 60 seconds
           connpool_timeout = provider_config['connection_pool_timeout'].nil? ? 60 : provider_config['connection_pool_timeout'].to_i
           logger.log('d', "[#{name}] ConnPool - Creating a connection pool of size #{connpool_size} with timeout #{connpool_timeout}")
+          @logger = logger
           @connection_pool = Vmpooler::PoolManager::GenericConnectionPool.new(
             metrics: metrics,
             connpool_type: 'provider_connection_pool',
@@ -204,11 +205,11 @@ module Vmpooler
                   value: pool_name
                 },
                 {
-                  key: 'lifetime',
+                  key: 'lifetime', # required by AWS reaper
                   value: get_current_lifetime(new_vmname)
                 },
                 {
-                  key: 'created_by',
+                  key: 'created_by', # required by AWS reaper
                   value: get_current_user(new_vmname)
                 },
                 {
@@ -216,14 +217,17 @@ module Vmpooler
                   value: get_current_job_url(new_vmname)
                 },
                 {
-                  key: 'organization',
+                  key: 'organization', # required by AWS reaper
                   value: 'engineering'
                 },
                 {
-                  key: 'portfolio',
+                  key: 'portfolio', # required by AWS reaper
                   value: 'ds-ci'
+                },
+                {
+                  key: 'Name',
+                  value: new_vmname
                 }
-
               ]
             }
           ]
@@ -247,16 +251,24 @@ module Vmpooler
           batch_instance = connection.create_instances(config)
           instance_id = batch_instance.first.instance_id
           connection.client.wait_until(:instance_running, { instance_ids: [instance_id] })
+          @logger.log('s', "[>] [#{pool_name}] '#{new_vmname}' instance running")
+          ### System status checks
+          # This check verifies that your instance is reachable. Amazon EC2 tests that network packets can get to your instance.
+          ### Instance status checks
+          # This check verifies that your instance's operating system is accepting traffic.
+          connection.client.wait_until(:instance_status_ok, { instance_ids: [instance_id] })
+          @logger.log('s', "[>] [#{pool_name}] '#{new_vmname}' instance ready to accept traffic")
           created_instance = get_vm(pool_name, new_vmname)
 
           # extra setup steps
-          provision_node_aws(created_instance['private_dns_name'], pool_name) if to_provision(pool_name) == 'true' || to_provision(pool_name) == true
+          provision_node_aws(created_instance['private_dns_name'], pool_name, new_vmname) if to_provision(pool_name) == 'true' || to_provision(pool_name) == true
 
           created_instance
         end
 
-        def provision_node_aws(vm, pool_name)
-          AwsSetup.setup_node_by_ssh(vm, pool_name)
+        def provision_node_aws(vm, pool_name, new_vmname)
+          aws_setup = AwsSetup.new(@logger, new_vmname)
+          aws_setup.setup_node_by_ssh(vm, pool_name)
         end
 
         def get_block_device_mappings(image_id, volume_size)
@@ -373,13 +385,14 @@ module Vmpooler
         def vm_ready?(pool_name, vm_name)
           begin
             # TODO: we could use a healthcheck resource attached to instance
-            domain_set = domain || global_config[:config]['domain']
+            domain_set = domain
             if domain_set.nil?
-              vm_ip = get_vm(pool_name, vm_name)['private_ip_address']
+              vm_ip = get_vm(pool_name, vm_name)['private_dns_name']
               vm_name = vm_ip unless vm_ip.nil?
             end
             open_socket(vm_name, domain_set)
-          rescue StandardError => _e
+          rescue StandardError => e
+            @logger.log('s', "[!] [#{pool_name}] '#{vm_name}' instance cannot be reached by vmpooler on tcp port 22; #{e}")
             return false
           end
           true
@@ -430,10 +443,11 @@ module Vmpooler
           end
         end
 
+        # returns lifetime in hours in the format Xh defaults to 1h
         def get_current_lifetime(vm_name)
           @redis.with_metrics do |redis|
-            lifetime = redis.hget("vmpooler__vm__#{vm_name}", 'lifetime') || '1h'
-            return lifetime
+            lifetime = redis.hget("vmpooler__vm__#{vm_name}", 'lifetime') || '1'
+            return "#{lifetime}h"
           end
         end
 
@@ -511,7 +525,7 @@ module Vmpooler
         def debug_logger(message, send_to_upstream: false)
           # the default logger is simple and does not enforce debug levels (the first argument)
           puts message if ENV['DEBUG_FLAG']
-          logger.log('[g]', message) if send_to_upstream
+          @logger.log('[g]', message) if send_to_upstream
         end
       end
     end

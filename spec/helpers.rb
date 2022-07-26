@@ -10,7 +10,9 @@ end
 # Mock an object which represents a Logger.  This stops the proliferation
 # of allow(logger).to .... expectations in tests.
 class MockLogger
-  def log(_level, string); end
+  def log(_level, string);
+    puts "#{string}"
+  end
 end
 
 def expect_json(ok = true, http = 200)
