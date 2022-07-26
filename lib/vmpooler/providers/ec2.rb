@@ -254,8 +254,6 @@ module Vmpooler
           @logger.log('s', "[>] [#{pool_name}] '#{new_vmname}' instance running")
           ### System status checks
           # This check verifies that your instance is reachable. Amazon EC2 tests that network packets can get to your instance.
-          # If this check fails, there might be an issue with the infrastructure that is hosting your instance (such as AWS power, networking, or software systems). You can restart or replace the instance, wait for Amazon EC2’s systems to resolve the issue, or seek technical support.
-          # This check does not validate that your operating system and applications are accepting traffic.
           ### Instance status checks
           # This check verifies that your instance's operating system is accepting traffic.
           connection.client.wait_until(:instance_status_ok, { instance_ids: [instance_id] })

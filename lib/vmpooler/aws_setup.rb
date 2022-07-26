@@ -18,11 +18,11 @@ module Vmpooler
 
       def setup_node_by_ssh(host, platform)
         conn = check_ssh_accepting_connections(host, platform)
-        if conn
-          @logger.log('s', "[>] [#{platform}] '#{@vm_name}' net:ssh connected")
-          configure_host(host, platform, conn)
-          @logger.log('s', "[>] [#{platform}] '#{@vm_name}' configured")
-        end
+        return unless conn
+
+        @logger.log('s', "[>] [#{platform}] '#{@vm_name}' net:ssh connected")
+        configure_host(host, platform, conn)
+        @logger.log('s', "[>] [#{platform}] '#{@vm_name}' configured")
       end
 
       # For an Amazon Linux AMI, the user name is ec2-user.
@@ -68,7 +68,6 @@ module Vmpooler
         rescue StandardError => e
           @logger.log('s', "[>] [#{platform}] '#{@vm_name}' net:ssh other error, skipping aws_setup: #{e}")
           puts e.backtrace
-          return nil
         end
       end
 
