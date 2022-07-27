@@ -81,7 +81,10 @@
 #     Overwrites the global domain parameter. This should match the dns zone domain set for the dns_zone_resource_name.
 #     It is used to infer the domain part of the FQDN ie $vm_name.$domain
 #     When setting multiple providers at the same time, this value should be set for each GCE pools.
-#     (optional) If not explicitely set, the FQDN is inferred using the global 'domain' config parameter
+#     (optional) when not set, the dns setup / teardown is skipped and the instance is reachable via the private_dns_name
+#   - project
+#     The GCP project name where the DNS zone resource exists
+#     (optional)
 # Example:
 
   :aws:
@@ -91,6 +94,7 @@
     volume_size: '10'
     dns_zone_resource_name: 'subdomain-example-com'
     domain: 'subdomain.example.com'
+    project: 'gcp-project-1'
 
 # :pools:
 #

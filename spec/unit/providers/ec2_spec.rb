@@ -53,23 +53,28 @@ EOT
 
   describe '#manual tests live' do
     context 'in itsysops' do
-      let(:vmname) { "instance-50" }
-      let(:poolname) { "ubuntu-2004-arm64" }
+      let(:vmname) { "instance-60" }
+      let(:poolname) { "amazon-7-x86_64-local" }
+      let(:amisize) { "c5.xlarge" }
       let(:config) { YAML.load(<<~EOT
   ---
   :config:
     max_tries: 3
     retry_factor: 10
+    site_name: 'vmpooler-local-dev'
   :providers:
     :ec2:
       connection_pool_timeout: 1
       zone: '#{zone}'
       region: '#{region}'
+      project: 'vmpooler-test'
+      dns_zone_resource_name: 'vmpooler-test-puppet-net'
+      domain: 'vmpooler-test.puppet.net'
   :pools:
     - name: '#{poolname}'
       alias: [ 'mockpool' ]
-      amisize: 'a1.large'
-      template: 'ami-03c1b544a7566b3e5'
+      amisize: '#{amisize}'
+      template: 'ami-31394949'
       size: 5
       timeout: 10
       ready_ttl: 1440
@@ -83,6 +88,7 @@ EOT
       }
       skip 'gets a vm' do
         result = subject.create_vm(poolname, vmname)
+        result = subject.destroy_vm(poolname, vmname)
         #subject.vms_in_pool("amazon-6-x86_64-ec2")
         #subject.provision_node_aws("ip-10-227-4-97.amz-dev.puppet.net", poolname)
         # subject.create_snapshot(poolname, vmname, "foo")

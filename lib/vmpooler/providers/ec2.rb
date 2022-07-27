@@ -3,6 +3,7 @@
 require 'bigdecimal'
 require 'bigdecimal/util'
 require 'vmpooler/providers/base'
+require 'vmpooler/cloud_dns'
 require 'aws-sdk-ec2'
 require 'vmpooler/aws_setup'
 
@@ -61,8 +62,6 @@ module Vmpooler
           end
         end
 
-        attr_reader :dns
-
         # main configuration options
         def region
           return provider_config['region'] if provider_config['region']
@@ -85,6 +84,10 @@ module Vmpooler
         end
 
         # dns
+        def project
+          provider_config['project']
+        end
+
         def domain
           provider_config['domain']
         end
@@ -267,10 +270,13 @@ module Vmpooler
           @logger.log('s', "[>] [#{pool_name}] '#{new_vmname}' instance ready to accept traffic")
           created_instance = get_vm(pool_name, new_vmname)
 
-          @redis.hset("vmpooler__vm__#{new_vmname}", 'host', created_instance['name'])
+          @redis.with_metrics do |redis|
+            redis.hset("vmpooler__vm__#{new_vmname}", 'host', created_instance['name'])
+          end
           # extra setup steps
           provision_node_aws(created_instance['private_dns_name'], pool_name, new_vmname) if to_provision(pool_name) == 'true' || to_provision(pool_name) == true
 
+          dns_setup(created_instance) if domain
           created_instance
         end
 
@@ -363,7 +369,7 @@ module Vmpooler
         #   [String] vm_name    : Name of the existing VM
         # returns
         #   [boolean] true : once the operations are finished
-        def destroy_vm(_pool_name, vm_name)
+        def destroy_vm(pool_name, vm_name)
           debug_logger('destroy_vm')
           deleted = false
 
@@ -374,6 +380,7 @@ module Vmpooler
           instances = connection.instances(filters: filters).first
           return true if instances.nil?
 
+          instance_hash = get_vm(pool_name, vm_name)
           debug_logger("trigger delete_instance #{vm_name}")
           # vm_hash = get_vm(pool_name, vm_name)
           instances.terminate
@@ -383,6 +390,8 @@ module Vmpooler
           rescue ::Aws::Waiters::Errors => e
             debug_logger("failed waiting for instance terminated #{vm_name}: #{e}")
           end
+
+          dns_teardown(instance_hash) if domain
 
           deleted
         end
@@ -436,6 +445,16 @@ module Vmpooler
         end
 
         # END BASE METHODS
+
+        def dns_setup(created_instance)
+          dns = Vmpooler::PoolManager::CloudDns.new(project, dns_zone_resource_name)
+          dns.dns_create_or_replace(created_instance)
+        end
+
+        def dns_teardown(created_instance)
+          dns = Vmpooler::PoolManager::CloudDns.new(project, dns_zone_resource_name)
+          dns.dns_teardown(created_instance)
+        end
 
         def get_current_user(vm_name)
           @redis.with_metrics do |redis|
@@ -494,6 +513,7 @@ module Vmpooler
             'status' => vm_object.state&.name, # One of the following values: pending, running, shutting-down, terminated, stopping, stopped
             # 'zone' => vm_object.zone,
             'image_size' => vm_object.instance_type,
+            'ip' => vm_object.private_ip_address,
             'private_ip_address' => vm_object.private_ip_address,
             'private_dns_name' => vm_object.private_dns_name
           }
