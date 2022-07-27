@@ -196,11 +196,11 @@ module Vmpooler
 
           subnet_id = get_subnet_id(pool_name)
           domain_set = domain
-          if domain_set.nil?
-            name_to_use = new_vmname
-          else
-            name_to_use = "#{new_vmname}.#{domain_set}"
-          end
+          name_to_use = if domain_set.nil?
+                          new_vmname
+                        else
+                          "#{new_vmname}.#{domain_set}"
+                        end
 
           tag = [
             {
@@ -216,7 +216,7 @@ module Vmpooler
                 },
                 {
                   key: 'lifetime', # required by AWS reaper
-                  value: get_max_lifetime
+                  value: max_lifetime
                 },
                 {
                   key: 'created_by', # required by AWS reaper
@@ -479,7 +479,7 @@ module Vmpooler
         end
 
         # returns max_lifetime_upper_limit in hours in the format Xh defaults to 12h
-        def get_max_lifetime
+        def max_lifetime
           max_hours = global_config[:config]['max_lifetime_upper_limit'] || '12'
           "#{max_hours}h"
         end
@@ -498,11 +498,11 @@ module Vmpooler
           return nil if pool_configuration.nil?
 
           domain_set = domain
-          if domain_set.nil?
-            name_to_use = vm_object.private_dns_name
-          else
-            name_to_use = vm_object.tags.detect { |f| f.key == 'Name' }&.value
-          end
+          name_to_use = if domain_set.nil?
+                          vm_object.private_dns_name
+                        else
+                          vm_object.tags.detect { |f| f.key == 'Name' }&.value
+                        end
 
           {
             'name' => name_to_use,
