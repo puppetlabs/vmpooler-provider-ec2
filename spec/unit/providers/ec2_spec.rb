@@ -159,7 +159,10 @@ EOT
 
     context 'when VM exists but is missing information' do
       before(:each) do
-        tags = [MockTag.new(key: "vm_name", value: vmname)]
+        tags = [
+          MockTag.new(key: "name", value: vmname),
+          MockTag.new(key: "vm_name", value: vmname)
+        ]
         allow(connection).to receive(:instances).and_return([MockInstance.new(tags: tags)])
       end
 
@@ -194,7 +197,7 @@ EOT
           instance_type: "a1.large",
           private_ip_address: "1.1.1.1",
           tags: [
-                  MockTag.new(key: "vm_name", value: vmname),
+                  MockTag.new(key: "name", value: vmname),
                   MockTag.new(key: "pool", value: poolname)
                 ]
         )
@@ -328,6 +331,8 @@ EOT
         allow(connection).to receive(:client).and_return(client)
         allow(client).to receive(:wait_until)
         allow(instance).to receive(:id)
+        allow(subject).to receive(:get_vm).and_return({})
+        allow(subject).to receive(:dns_teardown).and_return(true)
       end
 
       it 'should return true' do
