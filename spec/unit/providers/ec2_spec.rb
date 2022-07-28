@@ -88,7 +88,8 @@ EOT
       }
       skip 'gets a vm' do
         result = subject.create_vm(poolname, vmname)
-        result = subject.destroy_vm(poolname, vmname)
+        subject.tag_vm_user(poolname, vmname)
+        #result = subject.destroy_vm(poolname, vmname)
         #subject.vms_in_pool("amazon-6-x86_64-ec2")
         #subject.provision_node_aws("ip-10-227-4-97.amz-dev.puppet.net", poolname)
         # subject.create_snapshot(poolname, vmname, "foo")
@@ -160,7 +161,7 @@ EOT
     context 'when VM exists but is missing information' do
       before(:each) do
         tags = [
-          MockTag.new(key: "name", value: vmname),
+          MockTag.new(key: "Name", value: vmname),
           MockTag.new(key: "vm_name", value: vmname)
         ]
         allow(connection).to receive(:instances).and_return([MockInstance.new(tags: tags)])
@@ -170,7 +171,8 @@ EOT
         expect(subject.get_vm(poolname, vmname)).to be_kind_of(Hash)
       end
 
-      it 'should return the VM name' do
+      it 'should return the VM name when domain set' do
+        config[:providers][:ec2]['domain'] = "foobar.com"
         result = subject.get_vm(poolname, vmname)
 
         expect(result['name']).to eq(vmname)
@@ -197,7 +199,7 @@ EOT
           instance_type: "a1.large",
           private_ip_address: "1.1.1.1",
           tags: [
-                  MockTag.new(key: "name", value: vmname),
+                  MockTag.new(key: "Name", value: vmname),
                   MockTag.new(key: "pool", value: poolname)
                 ]
         )
