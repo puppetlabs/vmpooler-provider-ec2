@@ -25,7 +25,16 @@ These steps expect two environment vars
 ### DNS
 AWS will setup a private ip and private dns hostname for the VM once running. Optionally we can setup a human readable DNS entry to resolve the VMPooler provider `spicy-proton` fqdn
 
-DNS is integrated via Google's CloudDNS service. To enable, a CloudDNS zone name must be provided in the config (see the example yaml file dns_zone_resource_name)
+DNS is integrated via Google's CloudDNS service.
+GCE authorization is handled via a service account (or personal account) private key (json format) and can be configured via
+
+1. GOOGLE_APPLICATION_CREDENTIALS environment variable eg GOOGLE_APPLICATION_CREDENTIALS=/my/home/directory/my_account_key.json
+
+Provider config needed:
+1. domain
+2. project
+3. dns_zone_resource_name
+(see the example yaml file)
 
 An A record is then created in that zone upon instance creation with the VM's internal IP, and deleted when the instance is destroyed.
 
@@ -44,8 +53,7 @@ do not have the pool label, and can be configured to allow a specific list of un
 ### Pre-requisite
 
 - An IAM user must exist in the target AWS account with permissions to create, delete vms etc
-- if using DNS, a DNS zone needs to be created in CloudDNS, and configured in the provider's config section with the name of that zone (dns_zone_resource_name). When not specified, the DNS setup and teardown is skipped.
-
+- if using DNS see section above, and a service account with permissions to change Cloud DNS need to exist
 
 ## License
 
