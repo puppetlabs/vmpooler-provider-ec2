@@ -64,23 +64,26 @@ module Vmpooler
 
         # main configuration options
         def region
-          provider_config['region'] if provider_config['region']
+          provider_config['region']
         end
 
         # main configuration options, overridable for each pool
         def zone(pool_name)
           return pool_config(pool_name)['zone'] if pool_config(pool_name)['zone']
-          provider_config['zone'] if provider_config['zone']
+
+          provider_config['zone']
         end
 
         def amisize(pool_name)
           return pool_config(pool_name)['amisize'] if pool_config(pool_name)['amisize']
-          provider_config['amisize'] if provider_config['amisize']
+
+          provider_config['amisize']
         end
 
         def volume_size(pool_name)
           return pool_config(pool_name)['volume_size'] if pool_config(pool_name)['volume_size']
-          provider_config['volume_size'] if provider_config['volume_size']
+
+          provider_config['volume_size']
         end
 
         # dns
@@ -107,7 +110,7 @@ module Vmpooler
         end
 
         def to_provision(pool_name)
-          pool_config(pool_name)['provision'] if pool_config(pool_name)['provision']
+          pool_config(pool_name)['provision']
         end
 
         # Base methods that are implemented:
@@ -427,17 +430,17 @@ module Vmpooler
           return false if vm_hash.nil?
 
           filters = [{
-                       name: 'tag:vm_name',
-                       values: [vm_name]
-                     }]
+            name: 'tag:vm_name',
+            values: [vm_name]
+          }]
           instances = connection.instances(filters: filters).first
           return false if instances.nil?
 
           # add new label called token-user, with value as user
-          instances.create_tags(tags:[key:"token-user", value: user])
+          instances.create_tags(tags: [key: 'token-user', value: user])
           true
         rescue StandardError => _e
-          return false
+          false
         end
 
         # END BASE METHODS
