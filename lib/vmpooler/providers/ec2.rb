@@ -276,10 +276,14 @@ module Vmpooler
           @redis.with_metrics do |redis|
             redis.hset("vmpooler__vm__#{new_vmname}", 'host', created_instance['private_dns_name'])
           end
-          # extra setup steps
-          provision_node_aws(created_instance['private_dns_name'], pool_name, new_vmname) if to_provision(pool_name) == 'true' || to_provision(pool_name) == true
 
-          dns_setup(created_instance) if domain
+          if domain
+            dns_setup(created_instance)
+            provision_node_aws(created_instance['name'], pool_name, new_vmname) if to_provision(pool_name) == 'true' || to_provision(pool_name) == true
+          elsif to_provision(pool_name) == 'true' || to_provision(pool_name) == true
+            provision_node_aws(created_instance['private_dns_name'], pool_name, new_vmname)
+          end
+
           created_instance
         end
 
