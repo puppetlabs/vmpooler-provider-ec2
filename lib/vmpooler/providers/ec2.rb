@@ -265,20 +265,21 @@ module Vmpooler
           instance_id = batch_instance.first.instance_id
           connection.client.wait_until(:instance_running, { instance_ids: [instance_id] })
           @logger.log('s', "[>] [#{pool_name}] '#{new_vmname}' instance running")
+          created_instance = get_vm(pool_name, new_vmname)
+          dns_setup(created_instance) if domain
+
           ### System status checks
           # This check verifies that your instance is reachable. Amazon EC2 tests that network packets can get to your instance.
           ### Instance status checks
           # This check verifies that your instance's operating system is accepting traffic.
           connection.client.wait_until(:instance_status_ok, { instance_ids: [instance_id] })
           @logger.log('s', "[>] [#{pool_name}] '#{new_vmname}' instance ready to accept traffic")
-          created_instance = get_vm(pool_name, new_vmname)
 
           @redis.with_metrics do |redis|
             redis.hset("vmpooler__vm__#{new_vmname}", 'host', created_instance['private_dns_name'])
           end
 
           if domain
-            dns_setup(created_instance)
             provision_node_aws(created_instance['name'], pool_name, new_vmname) if to_provision(pool_name) == 'true' || to_provision(pool_name) == true
           elsif to_provision(pool_name) == 'true' || to_provision(pool_name) == true
             provision_node_aws(created_instance['private_dns_name'], pool_name, new_vmname)
