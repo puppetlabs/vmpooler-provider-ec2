@@ -53,23 +53,28 @@ EOT
 
   describe '#manual tests live' do
     context 'in itsysops' do
-      let(:vmname) { "instance-50" }
-      let(:poolname) { "ubuntu-2004-arm64" }
+      let(:vmname) { "instance-60" }
+      let(:poolname) { "amazon-7-x86_64-local" }
+      let(:amisize) { "c5.xlarge" }
       let(:config) { YAML.load(<<~EOT
   ---
   :config:
     max_tries: 3
     retry_factor: 10
+    site_name: 'vmpooler-local-dev'
   :providers:
     :ec2:
       connection_pool_timeout: 1
       zone: '#{zone}'
       region: '#{region}'
+      project: 'vmpooler-test'
+      dns_zone_resource_name: 'vmpooler-test-puppet-net'
+      domain: 'vmpooler-test.puppet.net'
   :pools:
     - name: '#{poolname}'
       alias: [ 'mockpool' ]
-      amisize: 'a1.large'
-      template: 'ami-03c1b544a7566b3e5'
+      amisize: '#{amisize}'
+      template: 'ami-31394949'
       size: 5
       timeout: 10
       ready_ttl: 1440
@@ -83,6 +88,8 @@ EOT
       }
       skip 'gets a vm' do
         result = subject.create_vm(poolname, vmname)
+        subject.tag_vm_user(poolname, vmname)
+        #result = subject.destroy_vm(poolname, vmname)
         #subject.vms_in_pool("amazon-6-x86_64-ec2")
         #subject.provision_node_aws("ip-10-227-4-97.amz-dev.puppet.net", poolname)
         # subject.create_snapshot(poolname, vmname, "foo")
@@ -153,7 +160,10 @@ EOT
 
     context 'when VM exists but is missing information' do
       before(:each) do
-        tags = [MockTag.new(key: "vm_name", value: vmname)]
+        tags = [
+          MockTag.new(key: "Name", value: vmname),
+          MockTag.new(key: "vm_name", value: vmname)
+        ]
         allow(connection).to receive(:instances).and_return([MockInstance.new(tags: tags)])
       end
 
@@ -161,7 +171,8 @@ EOT
         expect(subject.get_vm(poolname, vmname)).to be_kind_of(Hash)
       end
 
-      it 'should return the VM name' do
+      it 'should return the VM name when domain set' do
+        config[:providers][:ec2]['domain'] = "foobar.com"
         result = subject.get_vm(poolname, vmname)
 
         expect(result['name']).to eq(vmname)
@@ -188,7 +199,7 @@ EOT
           instance_type: "a1.large",
           private_ip_address: "1.1.1.1",
           tags: [
-                  MockTag.new(key: "vm_name", value: vmname),
+                  MockTag.new(key: "Name", value: vmname),
                   MockTag.new(key: "pool", value: poolname)
                 ]
         )
@@ -322,6 +333,8 @@ EOT
         allow(connection).to receive(:client).and_return(client)
         allow(client).to receive(:wait_until)
         allow(instance).to receive(:id)
+        allow(subject).to receive(:get_vm).and_return({})
+        allow(subject).to receive(:dns_teardown).and_return(true)
       end
 
       it 'should return true' do

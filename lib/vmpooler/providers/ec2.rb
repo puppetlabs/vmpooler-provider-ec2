@@ -3,6 +3,7 @@
 require 'bigdecimal'
 require 'bigdecimal/util'
 require 'vmpooler/providers/base'
+require 'vmpooler/cloud_dns'
 require 'aws-sdk-ec2'
 require 'vmpooler/aws_setup'
 
@@ -61,30 +62,35 @@ module Vmpooler
           end
         end
 
-        attr_reader :dns
-
         # main configuration options
         def region
-          return provider_config['region'] if provider_config['region']
+          provider_config['region']
         end
 
         # main configuration options, overridable for each pool
         def zone(pool_name)
           return pool_config(pool_name)['zone'] if pool_config(pool_name)['zone']
-          return provider_config['zone'] if provider_config['zone']
+
+          provider_config['zone']
         end
 
         def amisize(pool_name)
           return pool_config(pool_name)['amisize'] if pool_config(pool_name)['amisize']
-          return provider_config['amisize'] if provider_config['amisize']
+
+          provider_config['amisize']
         end
 
         def volume_size(pool_name)
           return pool_config(pool_name)['volume_size'] if pool_config(pool_name)['volume_size']
-          return provider_config['volume_size'] if provider_config['volume_size']
+
+          provider_config['volume_size']
         end
 
         # dns
+        def project
+          provider_config['project']
+        end
+
         def domain
           provider_config['domain']
         end
@@ -104,7 +110,7 @@ module Vmpooler
         end
 
         def to_provision(pool_name)
-          return pool_config(pool_name)['provision'] if pool_config(pool_name)['provision']
+          pool_config(pool_name)['provision']
         end
 
         # Base methods that are implemented:
@@ -192,6 +198,13 @@ module Vmpooler
           raise("Instance creation not attempted, #{new_vmname} already exists") if get_vm(pool_name, new_vmname)
 
           subnet_id = get_subnet_id(pool_name)
+          domain_set = domain
+          name_to_use = if domain_set.nil?
+                          new_vmname
+                        else
+                          "#{new_vmname}.#{domain_set}"
+                        end
+
           tag = [
             {
               resource_type: 'instance', # accepts capacity-reservation, client-vpn-endpoint, customer-gateway, carrier-gateway, dedicated-host, dhcp-options, egress-only-internet-gateway, elastic-ip, elastic-gpu, export-image-task, export-instance-task, fleet, fpga-image, host-reservation, image, import-image-task, import-snapshot-task, instance, instance-event-window, internet-gateway, ipam, ipam-pool, ipam-scope, ipv4pool-ec2, ipv6pool-ec2, key-pair, launch-template, local-gateway, local-gateway-route-table, local-gateway-virtual-interface, local-gateway-virtual-interface-group, local-gateway-route-table-vpc-association, local-gateway-route-table-virtual-interface-group-association, natgateway, network-acl, network-interface, network-insights-analysis, network-insights-path, network-insights-access-scope, network-insights-access-scope-analysis, placement-group, prefix-list, replace-root-volume-task, reserved-instances, route-table, security-group, security-group-rule, snapshot, spot-fleet-request, spot-instances-request, subnet, subnet-cidr-reservation, traffic-mirror-filter, traffic-mirror-session, traffic-mirror-target, transit-gateway, transit-gateway-attachment, transit-gateway-connect-peer, transit-gateway-multicast-domain, transit-gateway-route-table, volume, vpc, vpc-endpoint, vpc-endpoint-service, vpc-peering-connection, vpn-connection, vpn-gateway, vpc-flow-log
@@ -206,7 +219,7 @@ module Vmpooler
                 },
                 {
                   key: 'lifetime', # required by AWS reaper
-                  value: get_current_lifetime(new_vmname)
+                  value: max_lifetime
                 },
                 {
                   key: 'created_by', # required by AWS reaper
@@ -226,7 +239,7 @@ module Vmpooler
                 },
                 {
                   key: 'Name',
-                  value: new_vmname
+                  value: name_to_use
                 }
               ]
             }
@@ -252,16 +265,25 @@ module Vmpooler
           instance_id = batch_instance.first.instance_id
           connection.client.wait_until(:instance_running, { instance_ids: [instance_id] })
           @logger.log('s', "[>] [#{pool_name}] '#{new_vmname}' instance running")
+          created_instance = get_vm(pool_name, new_vmname)
+          dns_setup(created_instance) if domain
+
           ### System status checks
           # This check verifies that your instance is reachable. Amazon EC2 tests that network packets can get to your instance.
           ### Instance status checks
           # This check verifies that your instance's operating system is accepting traffic.
           connection.client.wait_until(:instance_status_ok, { instance_ids: [instance_id] })
           @logger.log('s', "[>] [#{pool_name}] '#{new_vmname}' instance ready to accept traffic")
-          created_instance = get_vm(pool_name, new_vmname)
 
-          # extra setup steps
-          provision_node_aws(created_instance['private_dns_name'], pool_name, new_vmname) if to_provision(pool_name) == 'true' || to_provision(pool_name) == true
+          @redis.with_metrics do |redis|
+            redis.hset("vmpooler__vm__#{new_vmname}", 'host', created_instance['private_dns_name'])
+          end
+
+          if domain
+            provision_node_aws(created_instance['name'], pool_name, new_vmname) if to_provision(pool_name) == 'true' || to_provision(pool_name) == true
+          elsif to_provision(pool_name) == 'true' || to_provision(pool_name) == true
+            provision_node_aws(created_instance['private_dns_name'], pool_name, new_vmname)
+          end
 
           created_instance
         end
@@ -355,7 +377,7 @@ module Vmpooler
         #   [String] vm_name    : Name of the existing VM
         # returns
         #   [boolean] true : once the operations are finished
-        def destroy_vm(_pool_name, vm_name)
+        def destroy_vm(pool_name, vm_name)
           debug_logger('destroy_vm')
           deleted = false
 
@@ -366,8 +388,8 @@ module Vmpooler
           instances = connection.instances(filters: filters).first
           return true if instances.nil?
 
+          instance_hash = get_vm(pool_name, vm_name)
           debug_logger("trigger delete_instance #{vm_name}")
-          # vm_hash = get_vm(pool_name, vm_name)
           instances.terminate
           begin
             connection.client.wait_until(:instance_terminated, { instance_ids: [instances.id] })
@@ -376,15 +398,16 @@ module Vmpooler
             debug_logger("failed waiting for instance terminated #{vm_name}: #{e}")
           end
 
+          dns_teardown(instance_hash) if domain
+
           deleted
         end
 
         # check if a vm is ready by opening a socket on port 22
         # if a domain is set, it will use vn_name.domain,
-        # if not then it will use the ip directly (AWS workaround)
+        # if not then it will use the private dns name directly (AWS workaround)
         def vm_ready?(pool_name, vm_name)
           begin
-            # TODO: we could use a healthcheck resource attached to instance
             domain_set = domain
             if domain_set.nil?
               vm_ip = get_vm(pool_name, vm_name)['private_dns_name']
@@ -411,23 +434,31 @@ module Vmpooler
           vm_hash = get_vm(pool, vm_name)
           return false if vm_hash.nil?
 
-          new_labels = vm_hash['labels']
-          # bailing in this case since labels should exist, and continuing would mean losing them
-          return false if new_labels.nil?
+          filters = [{
+            name: 'tag:vm_name',
+            values: [vm_name]
+          }]
+          instances = connection.instances(filters: filters).first
+          return false if instances.nil?
 
           # add new label called token-user, with value as user
-          new_labels['token-user'] = user
-          begin
-            instances_set_labels_request_object = Google::Apis::ComputeV1::InstancesSetLabelsRequest.new(label_fingerprint: vm_hash['label_fingerprint'], labels: new_labels)
-            result = connection.set_instance_labels(project, zone(pool), vm_name, instances_set_labels_request_object)
-            wait_for_zone_operation(project, zone(pool), result)
-          rescue StandardError => _e
-            return false
-          end
+          instances.create_tags(tags: [key: 'token-user', value: user])
           true
+        rescue StandardError => _e
+          false
         end
 
         # END BASE METHODS
+
+        def dns_setup(created_instance)
+          dns = Vmpooler::PoolManager::CloudDns.new(project, dns_zone_resource_name)
+          dns.dns_create_or_replace(created_instance)
+        end
+
+        def dns_teardown(created_instance)
+          dns = Vmpooler::PoolManager::CloudDns.new(project, dns_zone_resource_name)
+          dns.dns_teardown(created_instance)
+        end
 
         def get_current_user(vm_name)
           @redis.with_metrics do |redis|
@@ -451,6 +482,12 @@ module Vmpooler
           end
         end
 
+        # returns max_lifetime_upper_limit in hours in the format Xh defaults to 12h
+        def max_lifetime
+          max_hours = global_config[:config]['max_lifetime_upper_limit'] || '12'
+          "#{max_hours}h"
+        end
+
         def get_current_job_url(vm_name)
           @redis.with_metrics do |redis|
             job = redis.hget("vmpooler__vm__#{vm_name}", 'tag:jenkins_build_url') || ''
@@ -465,7 +502,7 @@ module Vmpooler
           return nil if pool_configuration.nil?
 
           {
-            'name' => vm_object.tags.detect { |f| f.key == 'vm_name' }&.value,
+            'name' => vm_object.tags.detect { |f| f.key == 'Name' }&.value,
             # 'hostname' => vm_object.hostname,
             'template' => pool_configuration&.key?('template') ? pool_configuration['template'] : nil, # was expecting to get it from API, not from config, but this is what vSphere does too!
             'poolname' => vm_object.tags.detect { |f| f.key == 'pool' }&.value,
@@ -473,6 +510,7 @@ module Vmpooler
             'status' => vm_object.state&.name, # One of the following values: pending, running, shutting-down, terminated, stopping, stopped
             # 'zone' => vm_object.zone,
             'image_size' => vm_object.instance_type,
+            'ip' => vm_object.private_ip_address, # used by the cloud dns class to set the record to this value
             'private_ip_address' => vm_object.private_ip_address,
             'private_dns_name' => vm_object.private_dns_name
           }
