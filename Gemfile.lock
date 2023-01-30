@@ -236,6 +236,7 @@ GEM
 
 PLATFORMS
   universal-java-1.8
+  universal-java-11
 
 DEPENDENCIES
   climate_control (>= 0.2.0)
