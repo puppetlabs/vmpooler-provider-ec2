@@ -406,7 +406,7 @@ module Vmpooler
         # check if a vm is ready by opening a socket on port 22
         # if a domain is set, it will use vn_name.domain,
         # if not then it will use the private dns name directly (AWS workaround)
-        def vm_ready?(pool_name, vm_name)
+        def vm_ready?(pool_name, vm_name, redis)
           begin
             domain_set = domain
             if domain_set.nil?
@@ -415,9 +415,10 @@ module Vmpooler
             end
             open_socket(vm_name, domain_set)
           rescue StandardError => e
-            @logger.log('s', "[!] [#{pool_name}] '#{vm_name}' instance cannot be reached by vmpooler on tcp port 22; #{e}")
+            redis.hset("vmpooler__vm__#{vm_name}", 'open_socket_error', e.to_s)
             return false
           end
+          redis.hdel("vmpooler__vm__#{vm_name}", 'open_socket_error')
           true
         end
 
